@@ -20,6 +20,9 @@ func TestExtractorExtract(t *testing.T) {
   <h1>Readable Title</h1>
   <p>This is the main content. This paragraph is intentionally long enough to
   satisfy the readability threshold and should be extracted as Markdown.</p>
+  <p>Inline <code>value</code> should remain inline.</p>
+  <div><code>fmt.Println("hello")
+fmt.Println("world")</code></div>
   <p>Another meaningful paragraph for the generated article content.</p>
 </article>
 </body>
@@ -35,5 +38,28 @@ func TestExtractorExtract(t *testing.T) {
 
 	if !strings.Contains(got.Markdown, "main content") {
 		t.Fatalf("markdown = %q", got.Markdown)
+	}
+	if !strings.Contains(got.HTML, `<pre><code>fmt.Println(&#34;hello&#34;)`) {
+		t.Fatalf("code block is not wrapped with pre: %q", got.HTML)
+	}
+	if !strings.Contains(got.HTML, `Inline <code>value</code> should remain inline.`) {
+		t.Fatalf("inline code was changed: %q", got.HTML)
+	}
+}
+
+func TestNormalizeCodeBlocksWrapsMultilineCodeOnly(t *testing.T) {
+	got := normalizeCodeBlocks(`<p>Inline <code>value</code>.</p><div><code>a
+b</code></div><pre><code>already
+wrapped</code></pre>`)
+
+	if !strings.Contains(got, `<p>Inline <code>value</code>.</p>`) {
+		t.Fatalf("inline code was changed: %q", got)
+	}
+	if !strings.Contains(got, `<div><pre><code>a
+b</code></pre></div>`) {
+		t.Fatalf("multiline code is not wrapped: %q", got)
+	}
+	if strings.Contains(got, `<pre><pre>`) {
+		t.Fatalf("existing pre was wrapped again: %q", got)
 	}
 }

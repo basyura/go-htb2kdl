@@ -1,6 +1,7 @@
 package content
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"strings"
 
 	readability "github.com/mackee/go-readability"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 type Article struct {
@@ -70,6 +73,97 @@ func (e *Extractor) Extract(ctx context.Context, targetURL string) (Article, err
 	return Article{
 		Title:    strings.TrimSpace(article.Title),
 		Markdown: markdown,
-		HTML:     strings.TrimSpace(readability.ToHTML(article.Root)),
+		HTML:     normalizeCodeBlocks(strings.TrimSpace(readability.ToHTML(article.Root))),
 	}, nil
+}
+
+func normalizeCodeBlocks(body string) string {
+	root := &html.Node{
+		Type:     html.ElementNode,
+		DataAtom: atom.Body,
+		Data:     "body",
+	}
+	nodes, err := html.ParseFragment(strings.NewReader(body), root)
+	if err != nil {
+		return body
+	}
+	for _, node := range nodes {
+		root.AppendChild(node)
+	}
+	linkParents(root)
+	var blocks []*html.Node
+	collectCodeBlocks(root, &blocks)
+	for _, block := range blocks {
+		wrapCodeBlock(block)
+	}
+
+	var buf bytes.Buffer
+	for node := root.FirstChild; node != nil; node = node.NextSibling {
+		if err := html.Render(&buf, node); err != nil {
+			return body
+		}
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+func linkParents(node *html.Node) {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		child.Parent = node
+		linkParents(child)
+	}
+}
+
+func collectCodeBlocks(node *html.Node, blocks *[]*html.Node) {
+	if node.Type != html.ElementNode || node.Data != "code" {
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			collectCodeBlocks(child, blocks)
+		}
+		return
+	}
+	if !hasAncestor(node, "pre") && isBlockCode(node) {
+		*blocks = append(*blocks, node)
+	}
+}
+
+func wrapCodeBlock(node *html.Node) {
+	parent := node.Parent
+	if parent == nil {
+		return
+	}
+	pre := &html.Node{
+		Type:     html.ElementNode,
+		DataAtom: atom.Pre,
+		Data:     "pre",
+	}
+	parent.InsertBefore(pre, node)
+	parent.RemoveChild(node)
+	pre.AppendChild(node)
+}
+
+func hasAncestor(node *html.Node, tag string) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Type == html.ElementNode && parent.Data == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func isBlockCode(node *html.Node) bool {
+	var walk func(*html.Node) bool
+	walk = func(n *html.Node) bool {
+		if n.Type == html.TextNode && strings.Contains(strings.TrimSpace(n.Data), "\n") {
+			return true
+		}
+		if n.Type == html.ElementNode && n.Data == "br" {
+			return true
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			if walk(child) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(node)
 }
