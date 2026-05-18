@@ -25,7 +25,24 @@ type options struct {
 	css  string
 }
 
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+type runConfig struct {
+	defaultStylesheet []byte
+}
+
+type RunOption func(*runConfig)
+
+func WithDefaultStylesheet(stylesheet []byte) RunOption {
+	return func(cfg *runConfig) {
+		cfg.defaultStylesheet = stylesheet
+	}
+}
+
+func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOptions ...RunOption) error {
+	var cfg runConfig
+	for _, option := range runOptions {
+		option(&cfg)
+	}
+
 	opts, err := parseArgs(args)
 	if err != nil {
 		return err
@@ -91,13 +108,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		out = book.DefaultOutputPath(opts.user, opts.from)
 	}
 
-	var stylesheet []byte
-	if opts.css != "" {
-		var err error
-		stylesheet, err = os.ReadFile(opts.css)
-		if err != nil {
-			return fmt.Errorf("CSS ファイルの読み込みに失敗しました: %w", err)
-		}
+	stylesheet, err := loadStylesheet(opts.css, cfg.defaultStylesheet)
+	if err != nil {
+		return err
 	}
 
 	if err := book.Write(book.Options{
@@ -115,6 +128,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "generated: %s\n", out)
 	return nil
+}
+
+func loadStylesheet(cssPath string, defaultStylesheet []byte) ([]byte, error) {
+	if cssPath == "" {
+		return defaultStylesheet, nil
+	}
+	stylesheet, err := os.ReadFile(cssPath)
+	if err != nil {
+		return nil, fmt.Errorf("CSS ファイルの読み込みに失敗しました: %w", err)
+	}
+	return stylesheet, nil
 }
 
 func parseArgs(args []string) (options, error) {
