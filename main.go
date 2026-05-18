@@ -1,7 +1,16 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"htb2kdl/internal/cli"
+)
 
 func main() {
-	fmt.Println("hello")
+	if err := cli.Run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
