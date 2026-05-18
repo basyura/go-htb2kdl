@@ -19,6 +19,9 @@ func TestWrite(t *testing.T) {
 		Author:  "alice",
 		Output:  out,
 		Created: time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC),
+		Stylesheet: []byte(`body {
+  font-family: serif;
+}`),
 		Chapters: []Chapter{
 			{
 				Title:    "Chapter 1",
@@ -67,10 +70,62 @@ func TestWrite(t *testing.T) {
 	if !strings.Contains(opf, `toc="toc"`) {
 		t.Fatalf("content.opf spine toc does not reference NCX item: %s", opf)
 	}
+	if !strings.Contains(opf, `href="style.css" media-type="text/css"`) {
+		t.Fatalf("content.opf is missing stylesheet manifest item: %s", opf)
+	}
 
 	toc := readZipFile(t, &zipReader.Reader, "epub/toc.xhtml")
 	if !strings.Contains(toc, `xmlns:epub="http://www.idpf.org/2007/ops"`) {
 		t.Fatalf("toc.xhtml is missing epub namespace: %s", toc)
+	}
+
+	stylesheet := readZipFile(t, &zipReader.Reader, "epub/style.css")
+	if !strings.Contains(stylesheet, "font-family: serif") {
+		t.Fatalf("style.css = %q", stylesheet)
+	}
+
+	chapter := readZipFile(t, &zipReader.Reader, "epub/chapter-001.xhtml")
+	if !strings.Contains(chapter, `<link rel="stylesheet" type="text/css" href="style.css" />`) {
+		t.Fatalf("chapter is missing stylesheet link: %s", chapter)
+	}
+	if strings.Contains(opf, `<itemref idref="style-css"`) {
+		t.Fatalf("stylesheet should not be in spine: %s", opf)
+	}
+}
+
+func TestWriteWithoutStylesheet(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "book.epub")
+	err := Write(Options{
+		Title:   "Test Book",
+		Author:  "alice",
+		Output:  out,
+		Created: time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC),
+		Chapters: []Chapter{
+			{
+				Title:    "Chapter 1",
+				URL:      "https://example.com",
+				HTMLBody: "<p>Hello</p>",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zipReader, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zipReader.Close()
+
+	opf := readZipFile(t, &zipReader.Reader, "epub/content.opf")
+	if strings.Contains(opf, `href="style.css"`) {
+		t.Fatalf("content.opf should not include stylesheet: %s", opf)
+	}
+
+	chapter := readZipFile(t, &zipReader.Reader, "epub/chapter-001.xhtml")
+	if strings.Contains(chapter, `href="style.css"`) {
+		t.Fatalf("chapter should not include stylesheet link: %s", chapter)
 	}
 }
 

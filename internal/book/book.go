@@ -25,11 +25,12 @@ type Chapter struct {
 }
 
 type Options struct {
-	Title    string
-	Author   string
-	Output   string
-	Chapters []Chapter
-	Created  time.Time
+	Title      string
+	Author     string
+	Output     string
+	Chapters   []Chapter
+	Created    time.Time
+	Stylesheet []byte
 }
 
 func DefaultOutputPath(user string, from time.Time) string {
@@ -69,7 +70,7 @@ func Write(opts Options) error {
 	}
 	for i, chapter := range opts.Chapters {
 		filename := fmt.Sprintf("chapter-%03d.xhtml", i+1)
-		writer.AddContent(filename, []byte(renderChapter(chapter)))
+		writer.AddContent(filename, []byte(renderChapter(chapter, len(opts.Stylesheet) > 0)))
 		toc.Items = append(toc.Items, epub.TOC{
 			Title: chapter.Title,
 			Href:  filename,
@@ -82,7 +83,7 @@ func Write(opts Options) error {
 	if err := writer.Write(opts.Output); err != nil {
 		return fmt.Errorf("EPUB の書き込みに失敗しました: %w", err)
 	}
-	if err := normalizeEPUB(opts.Output); err != nil {
+	if err := normalizeEPUB(opts.Output, opts.Stylesheet); err != nil {
 		return fmt.Errorf("EPUB の正規化に失敗しました: %w", err)
 	}
 	return nil
@@ -94,7 +95,7 @@ type zipEntry struct {
 	data   []byte
 }
 
-func normalizeEPUB(path string) error {
+func normalizeEPUB(path string, stylesheet []byte) error {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
 		return err
@@ -119,6 +120,9 @@ func normalizeEPUB(path string) error {
 		switch file.Name {
 		case "epub/content.opf":
 			data = ensurePackageNamespaces(data)
+			if len(stylesheet) > 0 {
+				data = ensureStylesheetManifest(data)
+			}
 		case "epub/toc.xhtml":
 			data = ensureEPUBNamespace(data)
 		}
@@ -146,6 +150,16 @@ func normalizeEPUB(path string) error {
 			continue
 		}
 		if err := writeEntry(writer, entry); err != nil {
+			_ = writer.Close()
+			return err
+		}
+	}
+	if len(stylesheet) > 0 {
+		if err := writeEntry(writer, zipEntry{
+			name:   "epub/style.css",
+			method: zip.Deflate,
+			data:   stylesheet,
+		}); err != nil {
 			_ = writer.Close()
 			return err
 		}
@@ -186,6 +200,14 @@ func ensurePackageNamespaces(data []byte) []byte {
 	return bytes.Replace(data, []byte(`toc="ncx"`), []byte(`toc="toc"`), 1)
 }
 
+func ensureStylesheetManifest(data []byte) []byte {
+	const item = `<item id="style-css" href="style.css" media-type="text/css"></item>`
+	if bytes.Contains(data, []byte(`href="style.css"`)) {
+		return data
+	}
+	return bytes.Replace(data, []byte(`</manifest>`), []byte(item+"\n  </manifest>"), 1)
+}
+
 func ensureEPUBNamespace(data []byte) []byte {
 	const epubNS = `xmlns:epub="http://www.idpf.org/2007/ops"`
 	if bytes.Contains(data, []byte(epubNS)) {
@@ -194,7 +216,7 @@ func ensureEPUBNamespace(data []byte) []byte {
 	return bytes.Replace(data, []byte(`<html `), []byte(`<html `+epubNS+` `), 1)
 }
 
-func renderChapter(ch Chapter) string {
+func renderChapter(ch Chapter, includeStylesheet bool) string {
 	date := ""
 	if !ch.BookmarkedAt.IsZero() {
 		date = ch.BookmarkedAt.Format(time.RFC3339)
@@ -218,12 +240,18 @@ func renderChapter(ch Chapter) string {
 	}
 	meta.WriteString(`</p>`)
 
+	stylesheet := ""
+	if includeStylesheet {
+		stylesheet = `
+  <link rel="stylesheet" type="text/css" href="style.css" />`
+	}
+
 	return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="ja" xml:lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>` + html.EscapeString(ch.Title) + `</title>
+  <title>` + html.EscapeString(ch.Title) + `</title>` + stylesheet + `
 </head>
 <body>
   <h1>` + html.EscapeString(ch.Title) + `</h1>

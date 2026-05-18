@@ -8,6 +8,12 @@
 go run . --user <はてなID> --from <yyyyMMdd>
 ```
 
+EPUB に任意の CSS を適用する場合は `--css` で CSS ファイルを指定する。
+
+```sh
+go run . --user <はてなID> --from <yyyyMMdd> --css style.css
+```
+
 ## はてなブックマーク
 
 認証無しで rss の url から取得する
@@ -29,5 +35,4 @@ go-readability を使って生成した markdown を `github.com/yuin/goldmark` 
 ## kindle へ送信
 
 gmail の smtp サーバーを使うことする。利用方法は別途検討とする。
-
 

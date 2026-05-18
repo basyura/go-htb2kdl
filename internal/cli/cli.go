@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"htb2kdl/internal/book"
@@ -21,6 +22,7 @@ type options struct {
 	user string
 	from time.Time
 	out  string
+	css  string
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -89,12 +91,22 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		out = book.DefaultOutputPath(opts.user, opts.from)
 	}
 
+	var stylesheet []byte
+	if opts.css != "" {
+		var err error
+		stylesheet, err = os.ReadFile(opts.css)
+		if err != nil {
+			return fmt.Errorf("CSS ファイルの読み込みに失敗しました: %w", err)
+		}
+	}
+
 	if err := book.Write(book.Options{
-		Title:    fmt.Sprintf("%s のはてなブックマーク", opts.user),
-		Author:   opts.user,
-		Output:   out,
-		Chapters: chapters,
-		Created:  time.Now(),
+		Title:      fmt.Sprintf("%s のはてなブックマーク", opts.user),
+		Author:     opts.user,
+		Output:     out,
+		Chapters:   chapters,
+		Created:    time.Now(),
+		Stylesheet: stylesheet,
 	}); err != nil {
 		return err
 	}
@@ -109,6 +121,7 @@ func parseArgs(args []string) (options, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.user, "user", "", "Hatena user ID")
 	fs.StringVar(&opts.out, "out", "", "output EPUB path")
+	fs.StringVar(&opts.css, "css", "", "CSS file path for EPUB styling")
 	from := fs.String("from", "", "bookmark date lower bound in yyyyMMdd")
 
 	if err := fs.Parse(args); err != nil {
