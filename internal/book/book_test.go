@@ -3,6 +3,8 @@ package book
 import (
 	"archive/zip"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,6 +128,71 @@ func TestWriteWithoutStylesheet(t *testing.T) {
 	chapter := readZipFile(t, &zipReader.Reader, "epub/chapter-001.xhtml")
 	if strings.Contains(chapter, `href="style.css"`) {
 		t.Fatalf("chapter should not include stylesheet link: %s", chapter)
+	}
+}
+
+func TestWriteDownloadsImages(t *testing.T) {
+	const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/assets/picture.png" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte(png))
+	}))
+	defer server.Close()
+
+	out := filepath.Join(t.TempDir(), "book.epub")
+	err := Write(Options{
+		Title:      "Test Book",
+		Author:     "alice",
+		Output:     out,
+		Created:    time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC),
+		HTTPClient: server.Client(),
+		Chapters: []Chapter{
+			{
+				Title:    "Chapter 1",
+				URL:      server.URL + "/articles/1",
+				HTMLBody: `<p>Hello</p><img alt="picture" src="/assets/picture.png" />`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zipReader, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zipReader.Close()
+
+	opf := readZipFile(t, &zipReader.Reader, "epub/content.opf")
+	if !strings.Contains(opf, `href="images/chapter-001-`) || !strings.Contains(opf, `media-type="image/png"`) {
+		t.Fatalf("content.opf is missing image manifest item: %s", opf)
+	}
+
+	chapter := readZipFile(t, &zipReader.Reader, "epub/chapter-001.xhtml")
+	if strings.Contains(chapter, `src="/assets/picture.png"`) || strings.Contains(chapter, `src="`+server.URL) {
+		t.Fatalf("chapter still references remote image: %s", chapter)
+	}
+	if !strings.Contains(chapter, `src="images/chapter-001-`) {
+		t.Fatalf("chapter does not reference embedded image: %s", chapter)
+	}
+
+	foundImage := false
+	for _, file := range zipReader.File {
+		if strings.HasPrefix(file.Name, "epub/images/chapter-001-") && strings.HasSuffix(file.Name, ".png") {
+			foundImage = true
+			image := readZipFile(t, &zipReader.Reader, file.Name)
+			if image != png {
+				t.Fatalf("embedded image = %q, want %q", image, png)
+			}
+		}
+	}
+	if !foundImage {
+		t.Fatal("missing embedded image")
 	}
 }
 

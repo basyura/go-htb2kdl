@@ -107,6 +107,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		Chapters:   chapters,
 		Created:    time.Now(),
 		Stylesheet: stylesheet,
+		Context:    ctx,
+		HTTPClient: client,
 	}); err != nil {
 		return err
 	}

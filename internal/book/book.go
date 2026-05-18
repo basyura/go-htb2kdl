@@ -3,18 +3,27 @@ package book
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"image"
 	"image/color"
 	"io"
+	"mime"
+	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/raitucarp/epub"
+	xhtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 type Chapter struct {
@@ -31,6 +40,8 @@ type Options struct {
 	Chapters   []Chapter
 	Created    time.Time
 	Stylesheet []byte
+	Context    context.Context
+	HTTPClient *http.Client
 }
 
 func DefaultOutputPath(user string, from time.Time) string {
@@ -63,6 +74,15 @@ func Write(opts Options) error {
 	if err := writer.CoverPNG(blankCover()); err != nil {
 		return fmt.Errorf("EPUB カバーの作成に失敗しました: %w", err)
 	}
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	httpClient := opts.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	imageCache := make(map[string]string)
 
 	toc := epub.TOC{
 		Title: opts.Title,
@@ -70,6 +90,11 @@ func Write(opts Options) error {
 	}
 	for i, chapter := range opts.Chapters {
 		filename := fmt.Sprintf("chapter-%03d.xhtml", i+1)
+		images, body := embedChapterImages(ctx, httpClient, chapter, i+1, imageCache)
+		for _, image := range images {
+			writer.AddImage(image.Name, image.Data)
+		}
+		chapter.HTMLBody = body
 		writer.AddContent(filename, []byte(renderChapter(chapter, len(opts.Stylesheet) > 0)))
 		toc.Items = append(toc.Items, epub.TOC{
 			Title: chapter.Title,
@@ -93,6 +118,171 @@ type zipEntry struct {
 	name   string
 	method uint16
 	data   []byte
+}
+
+type chapterImage struct {
+	Name string
+	Data []byte
+}
+
+func embedChapterImages(ctx context.Context, client *http.Client, chapter Chapter, chapterNo int, cache map[string]string) ([]chapterImage, string) {
+	if !strings.Contains(chapter.HTMLBody, "<img") {
+		return nil, chapter.HTMLBody
+	}
+
+	root := &xhtml.Node{
+		Type:     xhtml.ElementNode,
+		DataAtom: atom.Body,
+		Data:     "body",
+	}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(chapter.HTMLBody), root)
+	if err != nil {
+		return nil, chapter.HTMLBody
+	}
+	for _, node := range nodes {
+		root.AppendChild(node)
+	}
+
+	base, _ := url.Parse(chapter.URL)
+	var images []chapterImage
+	seen := make(map[string]struct{})
+	rewriteImages(root, func(src string) string {
+		imageURL := resolveImageURL(base, src)
+		if imageURL == "" {
+			return src
+		}
+		if name, ok := cache[imageURL]; ok {
+			return path.Join("images", name)
+		}
+
+		data, contentType, err := downloadImage(ctx, client, imageURL)
+		if err != nil {
+			return src
+		}
+		name := imageFileName(chapterNo, imageURL, contentType, data)
+		cache[imageURL] = name
+		if _, ok := seen[name]; !ok {
+			images = append(images, chapterImage{Name: name, Data: data})
+			seen[name] = struct{}{}
+		}
+		return path.Join("images", name)
+	})
+
+	var buf bytes.Buffer
+	for node := root.FirstChild; node != nil; node = node.NextSibling {
+		if err := xhtml.Render(&buf, node); err != nil {
+			return images, chapter.HTMLBody
+		}
+	}
+	return images, strings.TrimSpace(buf.String())
+}
+
+func rewriteImages(node *xhtml.Node, rewrite func(string) string) {
+	if node.Type == xhtml.ElementNode && node.Data == "img" {
+		for i := range node.Attr {
+			if strings.EqualFold(node.Attr[i].Key, "src") {
+				node.Attr[i].Val = rewrite(strings.TrimSpace(node.Attr[i].Val))
+			}
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		rewriteImages(child, rewrite)
+	}
+}
+
+func resolveImageURL(base *url.URL, src string) string {
+	if src == "" || strings.HasPrefix(src, "data:") || strings.HasPrefix(src, "cid:") {
+		return ""
+	}
+	ref, err := url.Parse(src)
+	if err != nil {
+		return ""
+	}
+	if !ref.IsAbs() {
+		if base == nil || base.Scheme == "" || base.Host == "" {
+			return ""
+		}
+		ref = base.ResolveReference(ref)
+	}
+	if ref.Scheme != "http" && ref.Scheme != "https" {
+		return ""
+	}
+	return ref.String()
+}
+
+func downloadImage(ctx context.Context, client *http.Client, imageURL string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("User-Agent", "htb2kdl/0.1")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("status %s", resp.Status)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(data) == 0 {
+		return nil, "", fmt.Errorf("empty image")
+	}
+	return data, resp.Header.Get("Content-Type"), nil
+}
+
+func imageFileName(chapterNo int, imageURL, contentType string, data []byte) string {
+	sum := sha1.Sum([]byte(imageURL))
+	ext := imageExtension(imageURL, contentType, data)
+	return fmt.Sprintf("chapter-%03d-%s%s", chapterNo, hex.EncodeToString(sum[:])[:12], ext)
+}
+
+func imageExtension(imageURL, contentType string, data []byte) string {
+	if parsed, err := url.Parse(imageURL); err == nil {
+		ext := strings.ToLower(path.Ext(parsed.Path))
+		if isImageExt(ext) {
+			return ext
+		}
+	}
+	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
+		switch mediaType {
+		case "image/jpeg":
+			return ".jpg"
+		case "image/png":
+			return ".png"
+		case "image/gif":
+			return ".gif"
+		case "image/svg+xml":
+			return ".svg"
+		case "image/webp":
+			return ".webp"
+		}
+	}
+	switch http.DetectContentType(data) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".img"
+	}
+}
+
+func isImageExt(ext string) bool {
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeEPUB(path string, stylesheet []byte) error {
