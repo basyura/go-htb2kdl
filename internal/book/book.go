@@ -94,7 +94,7 @@ func Write(opts Options) error {
 		for _, image := range images {
 			writer.AddImage(image.Name, image.Data)
 		}
-		chapter.HTMLBody = body
+		chapter.HTMLBody = rewriteChapterLinks(body, chapter.URL)
 		writer.AddContent(filename, []byte(renderChapter(chapter, len(opts.Stylesheet) > 0)))
 		toc.Items = append(toc.Items, epub.TOC{
 			Title: chapter.Title,
@@ -188,6 +188,68 @@ func rewriteImages(node *xhtml.Node, rewrite func(string) string) {
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
 		rewriteImages(child, rewrite)
 	}
+}
+
+func rewriteChapterLinks(body, baseURL string) string {
+	root := &xhtml.Node{
+		Type:     xhtml.ElementNode,
+		DataAtom: atom.Body,
+		Data:     "body",
+	}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(body), root)
+	if err != nil {
+		return body
+	}
+	for _, node := range nodes {
+		root.AppendChild(node)
+	}
+
+	base, _ := url.Parse(baseURL)
+	rewriteLinks(root, func(href string) string {
+		linkURL := resolveLinkURL(base, href)
+		if linkURL == "" {
+			return href
+		}
+		return linkURL
+	})
+
+	var buf bytes.Buffer
+	for node := root.FirstChild; node != nil; node = node.NextSibling {
+		if err := xhtml.Render(&buf, node); err != nil {
+			return body
+		}
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+func rewriteLinks(node *xhtml.Node, rewrite func(string) string) {
+	if node.Type == xhtml.ElementNode && node.Data == "a" {
+		for i := range node.Attr {
+			if strings.EqualFold(node.Attr[i].Key, "href") {
+				node.Attr[i].Val = rewrite(strings.TrimSpace(node.Attr[i].Val))
+			}
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		rewriteLinks(child, rewrite)
+	}
+}
+
+func resolveLinkURL(base *url.URL, href string) string {
+	if href == "" {
+		return ""
+	}
+	ref, err := url.Parse(href)
+	if err != nil {
+		return ""
+	}
+	if base == nil || base.Scheme == "" || base.Host == "" {
+		return ""
+	}
+	if ref.IsAbs() {
+		return ""
+	}
+	return base.ResolveReference(ref).String()
 }
 
 func resolveImageURL(base *url.URL, src string) string {
@@ -310,11 +372,16 @@ func normalizeEPUB(path string, stylesheet []byte) error {
 		switch file.Name {
 		case "epub/content.opf":
 			data = ensurePackageNamespaces(data)
+			data = ensureModifiedMetadata(data)
+			data = ensureImageMediaTypes(data)
 			if len(stylesheet) > 0 {
 				data = ensureStylesheetManifest(data)
 			}
+		case "epub/toc.ncx":
+			data = ensureNCXMetadata(data)
 		case "epub/toc.xhtml":
 			data = ensureEPUBNamespace(data)
+			data = removeEmptyLandmarks(data)
 		}
 
 		entries = append(entries, zipEntry{
@@ -322,6 +389,13 @@ func normalizeEPUB(path string, stylesheet []byte) error {
 			method: file.Method,
 			data:   data,
 		})
+	}
+	if uid := packageIdentifier(entries); uid != "" {
+		for i := range entries {
+			if entries[i].name == "epub/toc.ncx" {
+				entries[i].data = ensureNCXUID(entries[i].data, uid)
+			}
+		}
 	}
 
 	var buf bytes.Buffer
@@ -390,6 +464,48 @@ func ensurePackageNamespaces(data []byte) []byte {
 	return bytes.Replace(data, []byte(`toc="ncx"`), []byte(`toc="toc"`), 1)
 }
 
+func ensureModifiedMetadata(data []byte) []byte {
+	if bytes.Contains(data, []byte(`property="dcterms:modified"`)) {
+		return data
+	}
+	modified := "1970-01-01T00:00:00Z"
+	dateRe := regexp.MustCompile(`<dc:date[^>]*>([^<]+)</dc:date>`)
+	if matches := dateRe.FindSubmatch(data); len(matches) == 2 {
+		if t, err := time.Parse(time.RFC3339, string(matches[1])); err == nil {
+			modified = t.UTC().Format("2006-01-02T15:04:05Z")
+		}
+	}
+	meta := `<meta property="dcterms:modified">` + modified + `</meta>`
+	return bytes.Replace(data, []byte(`</metadata>`), []byte("    "+meta+"\n  </metadata>"), 1)
+}
+
+func ensureNCXMetadata(data []byte) []byte {
+	data = regexp.MustCompile(`version="[^"]*"`).ReplaceAll(data, []byte(`version="2005-1"`))
+	if bytes.Contains(data, []byte(`<meta name="dtb:uid"`)) {
+		return data
+	}
+	head := `<head><meta name="dtb:uid" content="htb2kdl"></meta><meta name="dtb:depth" content="1"></meta><meta name="dtb:totalPageCount" content="0"></meta><meta name="dtb:maxPageNumber" content="0"></meta></head>`
+	return regexp.MustCompile(`<head>\s*</head>`).ReplaceAll(data, []byte(head))
+}
+
+func packageIdentifier(entries []zipEntry) string {
+	re := regexp.MustCompile(`<dc:identifier[^>]*\bid="pub-id"[^>]*>([^<]+)</dc:identifier>`)
+	for _, entry := range entries {
+		if entry.name != "epub/content.opf" {
+			continue
+		}
+		if matches := re.FindSubmatch(entry.data); len(matches) == 2 {
+			return string(matches[1])
+		}
+	}
+	return ""
+}
+
+func ensureNCXUID(data []byte, uid string) []byte {
+	re := regexp.MustCompile(`(<meta name="dtb:uid" content=")[^"]*("></meta>)`)
+	return re.ReplaceAll(data, []byte(`${1}`+html.EscapeString(uid)+`${2}`))
+}
+
 func ensureStylesheetManifest(data []byte) []byte {
 	const item = `<item id="style-css" href="style.css" media-type="text/css"></item>`
 	if bytes.Contains(data, []byte(`href="style.css"`)) {
@@ -398,12 +514,33 @@ func ensureStylesheetManifest(data []byte) []byte {
 	return bytes.Replace(data, []byte(`</manifest>`), []byte(item+"\n  </manifest>"), 1)
 }
 
+func ensureImageMediaTypes(data []byte) []byte {
+	replacements := map[string]string{
+		".svg":  "image/svg+xml",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+	}
+	for ext, mediaType := range replacements {
+		re := regexp.MustCompile(`(<item\b[^>]*href="[^"]+` + regexp.QuoteMeta(ext) + `"[^>]*media-type=")[^"]+("[^>]*>)`)
+		data = re.ReplaceAll(data, []byte(`${1}`+mediaType+`${2}`))
+	}
+	return data
+}
+
 func ensureEPUBNamespace(data []byte) []byte {
 	const epubNS = `xmlns:epub="http://www.idpf.org/2007/ops"`
 	if bytes.Contains(data, []byte(epubNS)) {
 		return data
 	}
 	return bytes.Replace(data, []byte(`<html `), []byte(`<html `+epubNS+` `), 1)
+}
+
+func removeEmptyLandmarks(data []byte) []byte {
+	re := regexp.MustCompile(`<nav\b[^>]*\bepub:type="landmarks"[^>]*>.*?<ol>\s*</ol>\s*</nav>`)
+	return re.ReplaceAll(data, nil)
 }
 
 func renderChapter(ch Chapter, includeStylesheet bool) string {

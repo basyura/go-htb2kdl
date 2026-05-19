@@ -187,3 +187,141 @@ func TestMarkdownConverterRepairsBareMultilineCodeBlock(t *testing.T) {
 		t.Fatalf("prose after bare code block was not preserved: %s", got)
 	}
 }
+
+func TestMarkdownConverterDoesNotTreatIndentedProseAsCode(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("// CounterScreen.kt: Composable関数から直接Navigatorを呼び出して画面遷移\nButton(onClick = { navController.navigateSetting() }) {\n    Text(\"Setting\")\n}\n\n    方式が統一されていないため、新しい画面を実装する際にどの方式へ合わせるべきか判断しづらく、開発者ごとの実装のばらつきを招いていました。\n\n    ## 私たちのMVVMアーキテクチャの改善方針\n\n    | 課題 | 解決方針 |\n    | --- | --- |\n    | イベント通知と画面遷移の不統一 | イベント通知をChannelに統一する |\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<code>方式が統一されていないため") {
+		t.Fatalf("prose was parsed as code: %s", got)
+	}
+	if !strings.Contains(got, "<p>方式が統一されていないため") {
+		t.Fatalf("prose was not parsed as paragraph: %s", got)
+	}
+	if !strings.Contains(got, "<h2>私たちのMVVMアーキテクチャの改善方針</h2>") {
+		t.Fatalf("heading was not parsed: %s", got)
+	}
+	if !strings.Contains(got, "<table>") {
+		t.Fatalf("table was not parsed: %s", got)
+	}
+}
+
+func TestMarkdownConverterDoesNotTreatIndentedListAsCode(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("## 目次\n\n    - [はじめに](#はじめに)\n    - [目次](#目次)\n      - [用語](#用語)\n    1. [まとめ](#まとめ)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<pre><code>- [はじめに]") {
+		t.Fatalf("list was parsed as code: %s", got)
+	}
+	if !strings.Contains(got, "<ul>") {
+		t.Fatalf("unordered list was not parsed: %s", got)
+	}
+	if !strings.Contains(got, "<ol>") {
+		t.Fatalf("ordered list was not parsed: %s", got)
+	}
+	if !strings.Contains(got, ">はじめに</a>") {
+		t.Fatalf("list link was not parsed: %s", got)
+	}
+}
+
+func TestMarkdownConverterClosesCodeBlockBeforeHeadingAfterCode(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("```\n// CounterScreen.kt: View側は単一のStateを購読するだけ\n@Composable\nfun CounterScreen(viewModel: CounterViewModel, /* ... */) {\n    val state by viewModel.state.collectAsStateWithLifecycle()\n\n    CounterScreenContent(\n        state = state,\n        onIncrement = viewModel::onIncrementClicked,\n        // ...\n    )\n}\n### ユーザー操作ごとのメソッド定義による責務の明確化\n\nUDFの原則に従い、ViewからのActionに反応してStateが更新されるシンプルな構造を考えました。\n\n```\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<code>### ユーザー操作") || strings.Contains(got, "<code>UDFの原則") {
+		t.Fatalf("heading or prose was parsed as code: %s", got)
+	}
+	if !strings.Contains(got, "<h3>ユーザー操作ごとのメソッド定義による責務の明確化</h3>") {
+		t.Fatalf("heading was not parsed: %s", got)
+	}
+	if !strings.Contains(got, "<p>UDFの原則に従い") {
+		t.Fatalf("prose was not parsed: %s", got)
+	}
+}
+
+func TestMarkdownConverterRepairsMixedCodeBlockAfterHTMLConversion(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("    // CounterScreen.kt: View側は単一のStateを購読するだけ\n    @Composable\n    fun CounterScreen(viewModel: CounterViewModel, /* ... */) {\n        val state by viewModel.state.collectAsStateWithLifecycle()\n    }\n    ### ユーザー操作ごとのメソッド定義による責務の明確化\n\n    UDFの原則に従い、ViewからのActionに反応してStateが更新されるシンプルな構造を考えました。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<code>### ユーザー操作") || strings.Contains(got, "<code>UDFの原則") {
+		t.Fatalf("heading or prose remains in code block: %s", got)
+	}
+	if !strings.Contains(got, "CounterScreen.kt") {
+		t.Fatalf("code prefix was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "<h3>ユーザー操作ごとのメソッド定義による責務の明確化</h3>") {
+		t.Fatalf("heading was not repaired: %s", got)
+	}
+	if !strings.Contains(got, "<p>UDFの原則に従い") {
+		t.Fatalf("prose was not repaired: %s", got)
+	}
+}
+
+func TestMarkdownConverterKeepsBareCodeWithJapaneseStringLiteral(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("LaunchedEffect(counter) {\nif (counter >= 10) {\nToast.makeText(context, \"10に到達しました\", Toast.LENGTH_SHORT).show()\n    }\n}\n\n本文です。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<p>LaunchedEffect") || strings.Contains(got, "<p>}</p>") {
+		t.Fatalf("bare code was split into paragraphs: %s", got)
+	}
+	if !strings.Contains(got, "<pre><code>LaunchedEffect(counter)") {
+		t.Fatalf("bare code was not parsed as code: %s", got)
+	}
+	if !strings.Contains(got, "10に到達しました") {
+		t.Fatalf("Japanese string literal was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "<p>本文です。</p>") {
+		t.Fatalf("prose after code was not preserved: %s", got)
+	}
+}
+
+func TestMarkdownConverterRemovesEmptyCodeBlocks(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("```\n```\n\n本文です。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<pre><code>") {
+		t.Fatalf("empty code block remains: %s", got)
+	}
+	if !strings.Contains(got, "<p>本文です。</p>") {
+		t.Fatalf("prose was not preserved: %s", got)
+	}
+}
+
+func TestMarkdownConverterKeepsShellCommandsWithCommentsAsCode(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("# circom 2.x（回路コンパイラ）\ncurl -sL https://example.com/circom -o circom\nchmod +x circom\n# snarkjs（証明ツールキット）\nnpm install -g snarkjs\n\n本文です。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<h1>circom") || strings.Contains(got, "<p>curl -sL") {
+		t.Fatalf("shell commands were not parsed as code: %s", got)
+	}
+	if !strings.Contains(got, "<pre><code># circom 2.x") {
+		t.Fatalf("shell code block missing: %s", got)
+	}
+	if !strings.Contains(got, "npm install -g snarkjs") {
+		t.Fatalf("shell command was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "<p>本文です。</p>") {
+		t.Fatalf("prose after shell code was not preserved: %s", got)
+	}
+}

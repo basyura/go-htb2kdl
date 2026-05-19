@@ -196,6 +196,71 @@ func TestWriteDownloadsImages(t *testing.T) {
 	}
 }
 
+func TestWriteNormalizesRootRelativeLinks(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "book.epub")
+	err := Write(Options{
+		Title:   "Test Book",
+		Author:  "alice",
+		Output:  out,
+		Created: time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC),
+		Chapters: []Chapter{
+			{
+				Title:    "Chapter 1",
+				URL:      "https://example.com/articles/1",
+				HTMLBody: `<p><a href="/topics/go">Go</a> <a href="#local">Local</a></p>`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zipReader, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zipReader.Close()
+
+	chapter := readZipFile(t, &zipReader.Reader, "epub/chapter-001.xhtml")
+	if !strings.Contains(chapter, `href="https://example.com/topics/go"`) {
+		t.Fatalf("root-relative link was not normalized: %s", chapter)
+	}
+	if !strings.Contains(chapter, `href="https://example.com/articles/1#local"`) {
+		t.Fatalf("fragment link was not normalized: %s", chapter)
+	}
+}
+
+func TestEnsureImageMediaTypes(t *testing.T) {
+	got := string(ensureImageMediaTypes([]byte(`<item href="images/icon.svg" id="icon" media-type="text/plain; charset=utf-8"></item>`)))
+	if !strings.Contains(got, `media-type="image/svg+xml"`) {
+		t.Fatalf("svg media type was not normalized: %s", got)
+	}
+}
+
+func TestEnsureEPUBCheckMetadata(t *testing.T) {
+	opf := []byte(`<package><metadata><dc:date>2026-05-19T14:07:41+09:00</dc:date></metadata></package>`)
+	gotOPF := string(ensureModifiedMetadata(opf))
+	if !strings.Contains(gotOPF, `<meta property="dcterms:modified">2026-05-19T05:07:41Z</meta>`) {
+		t.Fatalf("missing modified metadata: %s", gotOPF)
+	}
+
+	ncx := []byte(`<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version=""><head></head></ncx>`)
+	gotNCX := string(ensureNCXMetadata(ncx))
+	if !strings.Contains(gotNCX, `version="2005-1"`) || !strings.Contains(gotNCX, `name="dtb:uid"`) {
+		t.Fatalf("ncx metadata was not normalized: %s", gotNCX)
+	}
+	gotNCX = string(ensureNCXUID([]byte(gotNCX), "htb2kdl:alice:20260519000000"))
+	if !strings.Contains(gotNCX, `content="htb2kdl:alice:20260519000000"`) {
+		t.Fatalf("ncx uid was not normalized: %s", gotNCX)
+	}
+
+	toc := []byte(`<html><body><nav id="toc" epub:type="toc"><ol><li>x</li></ol></nav><nav id="landmarks" epub:type="landmarks"><h2>Landmarks</h2><ol></ol></nav></body></html>`)
+	gotTOC := string(removeEmptyLandmarks(toc))
+	if strings.Contains(gotTOC, `epub:type="landmarks"`) {
+		t.Fatalf("empty landmarks nav remains: %s", gotTOC)
+	}
+}
+
 func readZipFile(t *testing.T, reader *zip.Reader, name string) string {
 	t.Helper()
 	for _, file := range reader.File {
