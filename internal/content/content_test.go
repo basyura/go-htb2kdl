@@ -39,27 +39,7 @@ fmt.Println("world")</code></div>
 	if !strings.Contains(got.Markdown, "main content") {
 		t.Fatalf("markdown = %q", got.Markdown)
 	}
-	if !strings.Contains(got.HTML, `<pre><code>fmt.Println(&#34;hello&#34;)`) {
-		t.Fatalf("code block is not wrapped with pre: %q", got.HTML)
-	}
-	if !strings.Contains(got.HTML, `Inline <code>value</code> should remain inline.`) {
-		t.Fatalf("inline code was changed: %q", got.HTML)
-	}
-}
-
-func TestNormalizeCodeBlocksWrapsMultilineCodeOnly(t *testing.T) {
-	got := normalizeCodeBlocks(`<p>Inline <code>value</code>.</p><div><code>a
-b</code></div><pre><code>already
-wrapped</code></pre>`)
-
-	if !strings.Contains(got, `<p>Inline <code>value</code>.</p>`) {
-		t.Fatalf("inline code was changed: %q", got)
-	}
-	if !strings.Contains(got, `<div><pre><code>a
-b</code></pre></div>`) {
-		t.Fatalf("multiline code is not wrapped: %q", got)
-	}
-	if strings.Contains(got, `<pre><pre>`) {
-		t.Fatalf("existing pre was wrapped again: %q", got)
+	if !strings.Contains(got.Markdown, "fmt.Println") {
+		t.Fatalf("markdown does not include code block: %q", got.Markdown)
 	}
 }

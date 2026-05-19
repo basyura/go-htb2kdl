@@ -1,6 +1,8 @@
 pre {
   border: 1px solid #efefef;
   padding: 2px;
+  font-size: 90%;
+  background-color: transparent;
 }
 
 table {
@@ -10,4 +12,10 @@ table {
 th,
 td {
   border: 1px solid #efefef;
+  font-size: 90%;
+}
+
+h2::before {
+  content: "## ";
+  padding-right: 1px;
 }

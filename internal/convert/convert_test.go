@@ -106,3 +106,84 @@ func TestMarkdownConverterClosesFenceBeforeProseAndTable(t *testing.T) {
 		t.Fatalf("table was not parsed: %s", got)
 	}
 }
+
+func TestMarkdownConverterRepairsLeadingDelimiterTable(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("以下の表です。\n\n| --- | --- | --- |\n|  | 変換元 |  |\n| `Instant` | `ZonedDateTime` | `PlainDateTime` |\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(got, "<table>") {
+		t.Fatalf("table was not parsed: %s", got)
+	}
+	if strings.Contains(got, "| --- | --- | --- |") {
+		t.Fatalf("table delimiter remains: %s", got)
+	}
+	if !strings.Contains(got, "<code>Instant</code>") {
+		t.Fatalf("table body was not preserved: %s", got)
+	}
+}
+
+func TestMarkdownConverterRepairsEmptyFenceBeforeCode(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("```\n```\n// CounterViewModel.kt: 単一のStateFlowで管理し、ユーザー操作ごとにメソッドを定義\nclass CounterViewModel : ViewModel() {\nprivate val _state = MutableStateFlow(CounterUiState())\nval state: StateFlow<CounterUiState> = _state.asStateFlow()\n}\n\n本文です。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<pre><code></code></pre>") {
+		t.Fatalf("empty code block remains: %s", got)
+	}
+	if !strings.Contains(got, "<pre><code>// CounterViewModel.kt") {
+		t.Fatalf("code was not parsed as code block: %s", got)
+	}
+	if strings.Contains(got, "<!-- raw HTML omitted -->") {
+		t.Fatalf("raw HTML omission remains: %s", got)
+	}
+	if !strings.Contains(got, "<p>本文です。</p>") {
+		t.Fatalf("prose after code block was not preserved: %s", got)
+	}
+}
+
+func TestMarkdownConverterKeepsJapaneseStringLiteralInCodeBlock(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("```\n// ViewがViewModelのプロパティを直接読み取ってToast表示を制御している\nval context = LocalContext.current\nButton(\n    onClick = {\n        viewModel.increment()\n        if (viewModel.currentCount == 10) {\n            Toast.makeText(context, \"10に到達しました\", Toast.LENGTH_SHORT).show()\n        }\n    }\n) {\n    Text(\"Increment\")\n}\nこのようにViewがViewModelの構造を知りすぎていました。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Count(got, "<pre><code>") != 1 {
+		t.Fatalf("code block was split: %s", got)
+	}
+	if strings.Contains(got, "<p>) {") {
+		t.Fatalf("code was parsed as paragraph: %s", got)
+	}
+	if !strings.Contains(got, "Toast.makeText") {
+		t.Fatalf("code with Japanese string literal was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "<p>このようにViewがViewModelの構造を知りすぎていました。</p>") {
+		t.Fatalf("prose after code block was not preserved: %s", got)
+	}
+}
+
+func TestMarkdownConverterRepairsBareMultilineCodeBlock(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("// 1つのユーザー操作に対してView側が複数メソッドを組み合わせて呼んでいる\nButton(\nonClick = {\nviewModel.increment()\nviewModel.checkLimit()\n}\n) {\nText(\"Increment\")\n}\n\n本文です。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<p>// 1つのユーザー操作") {
+		t.Fatalf("bare code was parsed as paragraph: %s", got)
+	}
+	if !strings.Contains(got, "<pre><code>// 1つのユーザー操作") {
+		t.Fatalf("bare code was not repaired as code block: %s", got)
+	}
+	if !strings.Contains(got, "viewModel.checkLimit()") {
+		t.Fatalf("code body was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "<p>本文です。</p>") {
+		t.Fatalf("prose after bare code block was not preserved: %s", got)
+	}
+}

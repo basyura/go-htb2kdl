@@ -11,7 +11,10 @@ import (
 	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
-var simpleCodeFenceInfo = regexp.MustCompile(`^[A-Za-z0-9_+.#-]+$`)
+var (
+	headingLineRegexp   = regexp.MustCompile(`^#{1,6}\s+`)
+	simpleCodeFenceInfo = regexp.MustCompile(`^[A-Za-z0-9_+.#-]+$`)
+)
 
 type MarkdownConverter struct {
 	md goldmark.Markdown
@@ -68,20 +71,144 @@ func normalizeMarkdown(markdown string) string {
 		out = append(out, line)
 	}
 
+	out = normalizeEmptyCodeFences(out)
+	out = normalizeBareCodeBlocks(out)
+	out = normalizeMalformedTables(out)
 	return strings.Join(out, "\n")
+}
+
+func normalizeEmptyCodeFences(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if i+2 >= len(lines) || strings.TrimSpace(lines[i]) != "```" || strings.TrimSpace(lines[i+1]) != "```" || !looksLikeCode(strings.TrimSpace(lines[i+2])) {
+			out = append(out, lines[i])
+			continue
+		}
+
+		out = append(out, "```")
+		i += 2
+		for i < len(lines) && shouldKeepInRepairedCodeBlock(strings.TrimSpace(lines[i])) {
+			out = append(out, lines[i])
+			i++
+		}
+		out = append(out, "```")
+		i--
+	}
+	return out
+}
+
+func shouldKeepInRepairedCodeBlock(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	if headingLineRegexp.MatchString(trimmed) {
+		return false
+	}
+	if isTableRow(trimmed) {
+		return false
+	}
+	if strings.ContainsAny(trimmed, "。、ですます") && !looksLikeCode(trimmed) {
+		return false
+	}
+	return looksLikeCode(trimmed) || looksLikeCodeContinuation(trimmed)
+}
+
+func normalizeBareCodeBlocks(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	inFence := false
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			out = append(out, lines[i])
+			continue
+		}
+		if inFence || !looksLikeCode(trimmed) {
+			out = append(out, lines[i])
+			continue
+		}
+
+		end := i
+		for end < len(lines) && shouldKeepInRepairedCodeBlock(strings.TrimSpace(lines[end])) {
+			end++
+		}
+		if end-i < 2 {
+			out = append(out, lines[i])
+			continue
+		}
+
+		out = append(out, "```")
+		out = append(out, lines[i:end]...)
+		out = append(out, "```")
+		i = end - 1
+	}
+	return out
+}
+
+func looksLikeCodeContinuation(trimmed string) bool {
+	codePrefixes := []string{
+		"@", ".", "private ", "public ", "protected ", "internal ", "override ",
+		"data ", "sealed ", "object ", "interface ", "enum ", "companion ",
+	}
+	for _, prefix := range codePrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return strings.ContainsAny(trimmed, "{}();:")
+}
+
+func normalizeMalformedTables(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if isTableDelimiterRow(line) && (i == 0 || !isTableRow(lines[i-1])) && i+1 < len(lines) && isTableRow(lines[i+1]) && !isTableDelimiterRow(lines[i+1]) {
+			out = append(out, lines[i+1], line)
+			i++
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func isTableRow(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") && strings.Count(trimmed, "|") >= 2
+}
+
+func isTableDelimiterRow(line string) bool {
+	if !isTableRow(line) {
+		return false
+	}
+	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
+	if len(cells) == 0 {
+		return false
+	}
+	for _, cell := range cells {
+		cell = strings.TrimSpace(cell)
+		if cell == "" {
+			return false
+		}
+		cell = strings.Trim(cell, ":")
+		if len(cell) < 3 || strings.Trim(cell, "-") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func shouldCloseFenceBefore(trimmed string) bool {
 	if trimmed == "" {
 		return false
 	}
-	if regexp.MustCompile(`^#{1,6}\s+`).MatchString(trimmed) {
+	if headingLineRegexp.MatchString(trimmed) {
 		return true
 	}
 	if strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") {
 		return true
 	}
-	if strings.ContainsAny(trimmed, "。、ですます") && !looksLikeCode(trimmed) {
+	if strings.ContainsAny(trimmed, "。、ですます") && !looksLikeCode(trimmed) && !looksLikeCodeContinuation(trimmed) {
 		return true
 	}
 	return false

@@ -78,14 +78,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 			title = bm.URL
 		}
 
-		body := article.HTML
-		if body == "" {
-			var err error
-			body, err = converter.Convert(article.Markdown)
-			if err != nil {
-				warnings = append(warnings, fmt.Errorf("%s: %w", bm.URL, err))
-				continue
-			}
+		body, err := converter.Convert(article.Markdown)
+		if err != nil {
+			warnings = append(warnings, fmt.Errorf("%s: %w", bm.URL, err))
+			continue
 		}
 
 		chapters = append(chapters, book.Chapter{

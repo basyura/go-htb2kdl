@@ -1,6 +1,7 @@
 # htb2kdl
 
-任意のユーザーのはてなブックマークを取得し、各ページの html から epub を生成して kindle に送る。
+任意のユーザーのはてなブックマークを取得し、各ページのメインコンテンツを
+markdown 経由で html に変換して epub を生成し、kindle に送る。
 
 ## Todo
 
@@ -14,7 +15,8 @@
 go run . --user <はてなID> --from <yyyyMMdd>
 ```
 
-EPUB に任意の CSS を適用する場合は `--css` で CSS ファイルを指定する。
+EPUB には同梱の `style.css` が既定で適用される。
+任意の CSS を適用する場合は `--css` で CSS ファイルを指定する。
 
 ```sh
 go run . --user <はてなID> --from <yyyyMMdd> --css style.css
@@ -41,4 +43,3 @@ go-readability を使って生成した markdown を `github.com/yuin/goldmark` 
 ## kindle へ送信
 
 gmail の smtp サーバーを使うことする。利用方法は別途検討とする。
-
