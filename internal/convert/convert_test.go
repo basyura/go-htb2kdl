@@ -20,6 +20,18 @@ func TestMarkdownConverterConvert(t *testing.T) {
 	}
 }
 
+func TestMarkdownConverterConvertsSoftLineBreakToBR(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("AA\nBB")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(got, "AA<br />\nBB") {
+		t.Fatalf("soft line break was not converted to br: %s", got)
+	}
+}
+
 func TestMarkdownConverterConvertGFMTable(t *testing.T) {
 	converter := NewMarkdownConverter()
 	got, err := converter.Convert("| Name | Value |\n| --- | --- |\n| foo | bar |\n")

@@ -27,7 +27,7 @@ func NewMarkdownConverter() *MarkdownConverter {
 	return &MarkdownConverter{
 		md: goldmark.New(
 			goldmark.WithExtensions(extension.GFM),
-			goldmark.WithRendererOptions(gmhtml.WithXHTML()),
+			goldmark.WithRendererOptions(gmhtml.WithHardWraps(), gmhtml.WithXHTML()),
 		),
 	}
 }

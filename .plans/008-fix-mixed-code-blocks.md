@@ -43,3 +43,4 @@
 - 記事内のルート相対リンクを元ページの origin 付き絶対 URL に変換する。
 - `epubcheck` で EPUB 全体を検証する。
 - `AGENTS.md` に EPUB 検証時の `epubcheck` 実行を明記する。
+- Markdown のソフト改行が `<br />` として出力されるよう HTML 変換を調整する。
