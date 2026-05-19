@@ -35,6 +35,8 @@ Use Go's standard `testing` package. Name tests `TestXxx` and place them in the 
 
 For EPUB behavior, inspect generated zip entries or relevant XHTML/OPF content rather than only checking that a file exists. For HTML conversion, assert specific rendered fragments.
 
+For EPUB validation, run `epubcheck <file.epub>` when available. Also verify that generated XHTML/OPF/NCX files are XML-well-formed, manifest references exist, and image references are embedded.
+
 Run `go test ./...` before submitting changes.
 
 ## Commit & Pull Request Guidelines

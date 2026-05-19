@@ -42,3 +42,4 @@
 - SVG 画像の OPF media-type を `image/svg+xml` にする。
 - 記事内のルート相対リンクを元ページの origin 付き絶対 URL に変換する。
 - `epubcheck` で EPUB 全体を検証する。
+- `AGENTS.md` に EPUB 検証時の `epubcheck` 実行を明記する。
