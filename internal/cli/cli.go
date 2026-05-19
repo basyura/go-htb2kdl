@@ -101,9 +101,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 		return errors.New("EPUB に含められる記事がありません")
 	}
 
+	created := time.Now()
 	out := opts.out
 	if out == "" {
-		out = book.DefaultOutputPath(opts.user, opts.from)
+		out = book.DefaultOutputPath(opts.user, created)
 	}
 
 	stylesheet, err := loadStylesheet(opts.css, cfg.defaultStylesheet)
@@ -116,7 +117,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 		Author:     opts.user,
 		Output:     out,
 		Chapters:   chapters,
-		Created:    time.Now(),
+		Created:    created,
 		Stylesheet: stylesheet,
 		Context:    ctx,
 		HTTPClient: client,

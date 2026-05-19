@@ -30,6 +30,11 @@ func TestWrite(t *testing.T) {
 				URL:      "https://example.com",
 				HTMLBody: "<p>Hello</p>",
 			},
+			{
+				Title:    "Chapter 2",
+				URL:      "https://example.com/2",
+				HTMLBody: "<p>World</p>",
+			},
 		},
 	})
 	if err != nil {
@@ -75,10 +80,46 @@ func TestWrite(t *testing.T) {
 	if !strings.Contains(opf, `href="style.css" media-type="text/css"`) {
 		t.Fatalf("content.opf is missing stylesheet manifest item: %s", opf)
 	}
+	if !strings.Contains(opf, `<item href="cover.xhtml" id="cover.xhtml" media-type="application/xhtml+xml"`) {
+		t.Fatalf("content.opf is missing cover page manifest item: %s", opf)
+	}
+	if strings.Contains(opf, `properties="cover-image"`) || strings.Contains(opf, `<meta name="cover"`) {
+		t.Fatalf("content.opf should not expose a separate cover image page: %s", opf)
+	}
+	if !strings.Contains(opf, `<itemref idref="cover.xhtml"></itemref>`) {
+		t.Fatalf("content.opf spine is missing cover page: %s", opf)
+	}
+	if strings.Index(opf, `<itemref idref="cover.xhtml"></itemref>`) > strings.Index(opf, `<itemref idref="chapter-001.xhtml"></itemref>`) {
+		t.Fatalf("cover page should be first in spine: %s", opf)
+	}
+	if !strings.Contains(opf, `<item href="bookmarks.xhtml" id="bookmarks.xhtml" media-type="application/xhtml+xml"`) {
+		t.Fatalf("content.opf is missing bookmarks page manifest item: %s", opf)
+	}
+	if !strings.Contains(opf, `<itemref idref="bookmarks.xhtml"></itemref>`) {
+		t.Fatalf("content.opf spine is missing bookmarks page: %s", opf)
+	}
+	if strings.Index(opf, `<itemref idref="bookmarks.xhtml"></itemref>`) < strings.Index(opf, `<itemref idref="cover.xhtml"></itemref>`) ||
+		strings.Index(opf, `<itemref idref="bookmarks.xhtml"></itemref>`) > strings.Index(opf, `<itemref idref="chapter-001.xhtml"></itemref>`) {
+		t.Fatalf("bookmarks page should be between cover and first chapter: %s", opf)
+	}
 
 	toc := readZipFile(t, &zipReader.Reader, "epub/toc.xhtml")
 	if !strings.Contains(toc, `xmlns:epub="http://www.idpf.org/2007/ops"`) {
 		t.Fatalf("toc.xhtml is missing epub namespace: %s", toc)
+	}
+
+	coverPage := readZipFile(t, &zipReader.Reader, "epub/cover.xhtml")
+	if !strings.Contains(coverPage, `src="images/cover.png"`) {
+		t.Fatalf("cover page does not reference cover image: %s", coverPage)
+	}
+
+	bookmarksPage := readZipFile(t, &zipReader.Reader, "epub/bookmarks.xhtml")
+	if !strings.Contains(bookmarksPage, `<h1>ブックマーク一覧</h1>`) {
+		t.Fatalf("bookmarks page is missing heading: %s", bookmarksPage)
+	}
+	if !strings.Contains(bookmarksPage, `<a href="chapter-001.xhtml">Chapter 1</a>`) ||
+		!strings.Contains(bookmarksPage, `<a href="chapter-002.xhtml">Chapter 2</a>`) {
+		t.Fatalf("bookmarks page is missing chapter links: %s", bookmarksPage)
 	}
 
 	stylesheet := readZipFile(t, &zipReader.Reader, "epub/style.css")
@@ -93,6 +134,29 @@ func TestWrite(t *testing.T) {
 	if strings.Contains(opf, `<itemref idref="style-css"`) {
 		t.Fatalf("stylesheet should not be in spine: %s", opf)
 	}
+}
+
+func TestDefaultOutputPathUsesCreatedTimestamp(t *testing.T) {
+	created := time.Date(2026, 5, 18, 18, 1, 30, 0, time.UTC)
+	got := DefaultOutputPath("basyura", created)
+	want := "hateb-basyura-202605181801.epub"
+	if got != want {
+		t.Fatalf("DefaultOutputPath = %q, want %q", got, want)
+	}
+}
+
+func TestCoverImageHasTitlePixels(t *testing.T) {
+	img := coverImage("basyura", time.Date(2026, 5, 19, 18, 1, 0, 0, time.UTC))
+	background := img.At(0, 0)
+
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			if img.At(x, y) != background {
+				return
+			}
+		}
+	}
+	t.Fatal("cover image has no title pixels")
 }
 
 func TestWriteWithoutStylesheet(t *testing.T) {
@@ -234,6 +298,17 @@ func TestEnsureImageMediaTypes(t *testing.T) {
 	got := string(ensureImageMediaTypes([]byte(`<item href="images/icon.svg" id="icon" media-type="text/plain; charset=utf-8"></item>`)))
 	if !strings.Contains(got, `media-type="image/svg+xml"`) {
 		t.Fatalf("svg media type was not normalized: %s", got)
+	}
+}
+
+func TestRemoveCoverImageMetadata(t *testing.T) {
+	opf := []byte(`<metadata><meta name="cover" content="cover.png"></meta></metadata><manifest><item href="images/cover.png" id="cover.png" media-type="image/png" properties="cover-image"></item></manifest>`)
+	got := string(removeCoverImageMetadata(opf))
+	if strings.Contains(got, `<meta name="cover"`) || strings.Contains(got, `properties="cover-image"`) {
+		t.Fatalf("cover image metadata remains: %s", got)
+	}
+	if !strings.Contains(got, `href="images/cover.png"`) {
+		t.Fatalf("cover image item should remain as a normal image: %s", got)
 	}
 }
 
