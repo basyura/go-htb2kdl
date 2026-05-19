@@ -5,7 +5,36 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"htb2kdl/internal/hatena"
 )
+
+func TestSortBookmarksOldestFirst(t *testing.T) {
+	oldest := time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC)
+	newest := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	middle := time.Date(2026, 5, 17, 10, 0, 0, 0, time.UTC)
+	bookmarks := []hatena.Bookmark{
+		{Title: "newest", BookmarkedAt: newest},
+		{Title: "unknown 1"},
+		{Title: "oldest", BookmarkedAt: oldest},
+		{Title: "unknown 2"},
+		{Title: "middle", BookmarkedAt: middle},
+	}
+
+	sortBookmarksOldestFirst(bookmarks)
+
+	got := make([]string, 0, len(bookmarks))
+	for _, bm := range bookmarks {
+		got = append(got, bm.Title)
+	}
+	want := []string{"oldest", "middle", "newest", "unknown 1", "unknown 2"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("bookmark order = %v, want %v", got, want)
+		}
+	}
+}
 
 func TestLoadStylesheetUsesDefaultWhenCSSPathIsEmpty(t *testing.T) {
 	stylesheet, err := loadStylesheet("", []byte("default css"))

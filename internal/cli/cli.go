@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	"htb2kdl/internal/book"
@@ -57,6 +58,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	if len(bookmarks) == 0 {
 		return errors.New("対象のブックマークがありません")
 	}
+	sortBookmarksOldestFirst(bookmarks)
 
 	extractor := content.NewExtractor(client)
 	converter := convert.NewMarkdownConverter()
@@ -124,6 +126,20 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 
 	fmt.Fprintf(stdout, "generated: %s\n", out)
 	return nil
+}
+
+func sortBookmarksOldestFirst(bookmarks []hatena.Bookmark) {
+	sort.SliceStable(bookmarks, func(i, j int) bool {
+		left := bookmarks[i].BookmarkedAt
+		right := bookmarks[j].BookmarkedAt
+		if left.IsZero() {
+			return false
+		}
+		if right.IsZero() {
+			return true
+		}
+		return left.Before(right)
+	})
 }
 
 func loadStylesheet(cssPath string, defaultStylesheet []byte) ([]byte, error) {
