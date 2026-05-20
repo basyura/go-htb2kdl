@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,5 +70,58 @@ func TestLoadStylesheetReportsCSSReadError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "CSS ファイルの読み込みに失敗しました") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestParseArgsThreshold(t *testing.T) {
+	opts, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.limit != 5 {
+		t.Fatalf("limit = %d, want 5", opts.limit)
+	}
+}
+
+func TestParseArgsRejectsNegativeThreshold(t *testing.T) {
+	_, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "-1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "--limit は 0 以上で指定してください") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBuildChaptersIncludesFailureChapter(t *testing.T) {
+	bookmarks := []hatena.Bookmark{{URL: "://bad-url"}}
+	var stderr strings.Builder
+
+	chapters, err := buildChapters(context.Background(), nil, bookmarks, true, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 1 {
+		t.Fatalf("len(chapters) = %d, want 1", len(chapters))
+	}
+	if chapters[0].Title != "記事を取得できませんでした" {
+		t.Fatalf("Title = %q", chapters[0].Title)
+	}
+	if !strings.Contains(chapters[0].HTMLBody, "記事本文を取得できませんでした。") ||
+		!strings.Contains(chapters[0].HTMLBody, "://bad-url") {
+		t.Fatalf("HTMLBody = %s", chapters[0].HTMLBody)
+	}
+	if !strings.Contains(stderr.String(), "warning:") {
+		t.Fatalf("stderr = %q, want warning", stderr.String())
+	}
+}
+
+func TestBuildChaptersWithoutFailureChapterReportsEmpty(t *testing.T) {
+	bookmarks := []hatena.Bookmark{{URL: "://bad-url"}}
+	var stderr strings.Builder
+
+	_, err := buildChapters(context.Background(), nil, bookmarks, false, &stderr)
+	if !errors.Is(err, errNoChapters) {
+		t.Fatalf("err = %v, want errNoChapters", err)
 	}
 }

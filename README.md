@@ -22,6 +22,33 @@ EPUB には同梱の `style.css` が既定で適用される。
 go run . --user <はてなID> --from <yyyyMMdd> --css style.css
 ```
 
+### 定期実行向けの蓄積モード
+
+`--limit` に 1 以上を指定すると、RSS から取得したブックマーク URL を
+実行ファイルと同じディレクトリの `bookmarks.yml` に蓄積する。蓄積 URL 数が
+しきい値に達した場合、先頭からしきい値件数だけ EPUB 化し、生成に成功した
+URL を `bookmarks` から `completed` へ移動する。
+
+```sh
+go build -o htb2kdl .
+./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5
+```
+
+`bookmarks.yml` は次の形式で管理する。
+
+```yaml
+users:
+  tatsuya:
+    bookmarks:
+      - "https://example.com/article-1"
+      - "https://example.com/article-2"
+    completed:
+      - "https://example.com/completed-1"
+```
+
+cron などから実行する場合は、`--out` を省略すると日時入りの EPUB ファイル名で
+出力される。
+
 ## はてなブックマーク
 
 認証無しで rss の url から取得する

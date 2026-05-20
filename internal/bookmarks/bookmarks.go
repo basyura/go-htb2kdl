@@ -1,0 +1,145 @@
+package bookmarks
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
+)
+
+type File struct {
+	Users map[string]User `yaml:"users"`
+}
+
+type User struct {
+	Bookmarks []string `yaml:"bookmarks"`
+	Completed []string `yaml:"completed"`
+}
+
+func Load(path string) (File, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return File{Users: make(map[string]User)}, nil
+		}
+		return File{}, fmt.Errorf("bookmarks.yml の読み込みに失敗しました: %w", err)
+	}
+
+	var file File
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return File{}, fmt.Errorf("bookmarks.yml の解析に失敗しました: %w", err)
+	}
+	if file.Users == nil {
+		file.Users = make(map[string]User)
+	}
+	return file, nil
+}
+
+func (f *File) Add(user string, urls []string) int {
+	if f.Users == nil {
+		f.Users = make(map[string]User)
+	}
+
+	entry := f.Users[user]
+	seen := make(map[string]struct{}, len(entry.Bookmarks)+len(entry.Completed))
+	for _, url := range entry.Bookmarks {
+		seen[url] = struct{}{}
+	}
+	for _, url := range entry.Completed {
+		seen[url] = struct{}{}
+	}
+
+	added := 0
+	for _, url := range urls {
+		if url == "" {
+			continue
+		}
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		entry.Bookmarks = append(entry.Bookmarks, url)
+		seen[url] = struct{}{}
+		added++
+	}
+	f.Users[user] = entry
+	return added
+}
+
+func (f File) Queued(user string) []string {
+	entry := f.Users[user]
+	return append([]string(nil), entry.Bookmarks...)
+}
+
+func (f *File) CompleteFirst(user string, count int) {
+	if count <= 0 {
+		return
+	}
+	entry := f.Users[user]
+	if count > len(entry.Bookmarks) {
+		count = len(entry.Bookmarks)
+	}
+
+	completed := entry.Bookmarks[:count]
+	seen := make(map[string]struct{}, len(entry.Completed)+len(completed))
+	for _, url := range entry.Completed {
+		seen[url] = struct{}{}
+	}
+	for _, url := range completed {
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		entry.Completed = append(entry.Completed, url)
+		seen[url] = struct{}{}
+	}
+
+	if count == len(entry.Bookmarks) {
+		entry.Bookmarks = nil
+	} else {
+		entry.Bookmarks = append([]string(nil), entry.Bookmarks[count:]...)
+	}
+	f.Users[user] = entry
+}
+
+func SaveAtomic(path string, file File) error {
+	if file.Users == nil {
+		file.Users = make(map[string]User)
+	}
+	data, err := yaml.Marshal(file)
+	if err != nil {
+		return fmt.Errorf("bookmarks.yml の生成に失敗しました: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("bookmarks.yml の出力ディレクトリ作成に失敗しました: %w", err)
+		}
+	}
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("bookmarks.yml 一時ファイルの作成に失敗しました: %w", err)
+	}
+	tmpPath := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("bookmarks.yml 一時ファイルの書き込みに失敗しました: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("bookmarks.yml 一時ファイルのクローズに失敗しました: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("bookmarks.yml の更新に失敗しました: %w", err)
+	}
+	removeTmp = false
+	return nil
+}
