@@ -18,6 +18,7 @@ import (
 	"htb2kdl/internal/content"
 	"htb2kdl/internal/convert"
 	"htb2kdl/internal/hatena"
+	"htb2kdl/internal/mail"
 )
 
 const dateLayout = "20060102"
@@ -31,6 +32,7 @@ type options struct {
 	css   string
 	file  string
 	limit int
+	send  bool
 }
 
 type runConfig struct {
@@ -79,7 +81,20 @@ func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stde
 	if err != nil {
 		return err
 	}
-	return writeBook(ctx, client, opts, cfg, chapters, stdout)
+	out, err := writeBook(ctx, client, opts, cfg, chapters, stdout)
+	if err != nil {
+		return err
+	}
+	if opts.send {
+		mailConfig, err := loadMailConfig(opts, cfg)
+		if err != nil {
+			return err
+		}
+		if err := sendBook(ctx, opts, mailConfig, out, stdout); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer) error {
@@ -126,8 +141,14 @@ func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr 
 	if err != nil {
 		return err
 	}
-	if err := writeBook(ctx, client, opts, cfg, chapters, stdout); err != nil {
+	out, err := writeBook(ctx, client, opts, cfg, chapters, stdout)
+	if err != nil {
 		return err
+	}
+	if opts.send {
+		if err := sendBook(ctx, opts, queue.Mail, out, stdout); err != nil {
+			return err
+		}
 	}
 
 	queue.CompleteFirst(opts.user, opts.limit)
@@ -197,7 +218,7 @@ func failedChapter(targetURL string, err error) book.Chapter {
 	}
 }
 
-func writeBook(ctx context.Context, client *http.Client, opts options, cfg runConfig, chapters []book.Chapter, stdout io.Writer) error {
+func writeBook(ctx context.Context, client *http.Client, opts options, cfg runConfig, chapters []book.Chapter, stdout io.Writer) (string, error) {
 	created := time.Now()
 	out := opts.out
 	if out == "" {
@@ -206,7 +227,7 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 
 	stylesheet, err := loadStylesheet(opts.css, cfg.defaultStylesheet)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if err := book.Write(book.Options{
@@ -219,10 +240,50 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 		Context:    ctx,
 		HTTPClient: client,
 	}); err != nil {
-		return err
+		return "", err
 	}
 
 	fmt.Fprintf(stdout, "generated: %s\n", out)
+	return out, nil
+}
+
+func loadMailConfig(opts options, cfg runConfig) (bookmarkfile.MailConfig, error) {
+	bookmarksPath, err := resolveBookmarksPath(opts, cfg)
+	if err != nil {
+		return bookmarkfile.MailConfig{}, err
+	}
+	file, err := bookmarkfile.Load(bookmarksPath)
+	if err != nil {
+		return bookmarkfile.MailConfig{}, err
+	}
+	return file.Mail, nil
+}
+
+func sendBook(ctx context.Context, opts options, cfg bookmarkfile.MailConfig, out string, stdout io.Writer) error {
+	mailConfig := mail.Config{
+		From:        cfg.From,
+		To:          cfg.To,
+		AppPassword: cfg.AppPassword,
+	}
+	if err := mail.SendEPUB(ctx, mailConfig, mail.EPUBMessage{
+		Subject: fmt.Sprintf("%s のはてなブックマーク", opts.user),
+		Body:    "生成した EPUB を送信します。",
+		Path:    out,
+	}); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "sent: %s\n", cfg.To)
+	if err := removeSentBook(out); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "removed: %s\n", out)
+	return nil
+}
+
+func removeSentBook(path string) error {
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("送信済み EPUB ファイルの削除に失敗しました: %w", err)
+	}
 	return nil
 }
 
@@ -274,6 +335,7 @@ func parseArgs(args []string) (options, error) {
 	fs.StringVar(&opts.css, "css", "", "CSS file path for EPUB styling")
 	fs.StringVar(&opts.file, "file", "", "bookmarks.yml path for queued mode")
 	fs.IntVar(&opts.limit, "limit", 0, "number of queued bookmarks required to generate EPUB")
+	fs.BoolVar(&opts.send, "send", false, "send generated EPUB by Gmail SMTP")
 	from := fs.String("from", "", "bookmark date lower bound in yyyyMMdd")
 
 	if err := fs.Parse(args); err != nil {

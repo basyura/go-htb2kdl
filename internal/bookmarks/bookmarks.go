@@ -10,7 +10,14 @@ import (
 )
 
 type File struct {
+	Mail  MailConfig      `yaml:"mail,omitempty"`
 	Users map[string]User `yaml:"users"`
+}
+
+type MailConfig struct {
+	From        string `yaml:"from"`
+	To          string `yaml:"to"`
+	AppPassword string `yaml:"app_password"`
 }
 
 type User struct {

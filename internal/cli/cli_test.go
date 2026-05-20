@@ -86,6 +86,16 @@ func TestParseArgsLimitAndFile(t *testing.T) {
 	}
 }
 
+func TestParseArgsSend(t *testing.T) {
+	opts, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--send"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.send {
+		t.Fatal("send = false, want true")
+	}
+}
+
 func TestParseArgsRejectsNegativeLimit(t *testing.T) {
 	_, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "-1"})
 	if err == nil {
@@ -103,6 +113,30 @@ func TestResolveBookmarksPathPrefersFileOption(t *testing.T) {
 	}
 	if got != "custom.yml" {
 		t.Fatalf("path = %q, want custom.yml", got)
+	}
+}
+
+func TestRemoveSentBook(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.epub")
+	if err := os.WriteFile(path, []byte("epub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeSentBook(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Stat error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestRemoveSentBookReportsError(t *testing.T) {
+	err := removeSentBook(filepath.Join(t.TempDir(), "missing.epub"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "送信済み EPUB ファイルの削除に失敗しました") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

@@ -7,7 +7,7 @@ markdown 経由で html に変換して epub を生成し、kindle に送る。
 
 - [x] ファイル名に生成日時を設定
 - [x] 一定の url 数に達したら epub 生成
-- [ ] メール送信
+- [x] メール送信
 
 ## 使い方
 
@@ -20,6 +20,14 @@ EPUB には同梱の `style.css` が既定で適用される。
 
 ```sh
 go run . --user <はてなID> --from <yyyyMMdd> --css style.css
+```
+
+`--send` を指定すると、生成した EPUB を Gmail の SMTP サーバー経由で
+送信する。送信先と Gmail のアプリパスワードは `bookmarks.yml` の `mail`
+に設定する。
+
+```sh
+go run . --user <はてなID> --from <yyyyMMdd> --send
 ```
 
 ### 定期実行向けの蓄積モード
@@ -42,11 +50,16 @@ URL を `bookmarks` から `completed` へ移動する。
 go build -o htb2kdl .
 ./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5
 ./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5 --file /path/to/bookmarks.yml
+./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5 --send
 ```
 
 `bookmarks.yml` は次の形式で管理する。
 
 ```yaml
+mail:
+  from: "sender@gmail.com"
+  to: "kindle@example.com"
+  app_password: "xxxx xxxx xxxx xxxx"
 users:
   tatsuya:
     bookmarks:
@@ -79,4 +92,7 @@ go-readability を使って生成した markdown を `github.com/yuin/goldmark` 
 
 ## kindle へ送信
 
-gmail の smtp サーバーを使うことする。利用方法は別途検討とする。
+`--send` を指定すると Gmail の SMTP サーバー `smtp.gmail.com:587` を使って
+生成した EPUB を送信する。`mail.from` には Gmail アドレス、`mail.to` には
+送信先メールアドレス、`mail.app_password` には Gmail のアプリパスワードを
+設定する。

@@ -20,7 +20,13 @@ func TestLoadMissingFile(t *testing.T) {
 
 func TestLoadAndSaveAtomic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bookmarks.yml")
-	file := File{}
+	file := File{
+		Mail: MailConfig{
+			From:        "sender@gmail.com",
+			To:          "kindle@example.com",
+			AppPassword: "app password",
+		},
+	}
 	file.Add("alice", []string{"https://example.com/1", "https://example.com/2"})
 	file.CompleteFirst("alice", 1)
 
@@ -40,6 +46,11 @@ func TestLoadAndSaveAtomic(t *testing.T) {
 	if !reflect.DeepEqual(completed, []string{"https://example.com/1"}) {
 		t.Fatalf("Completed = %v", completed)
 	}
+	if got.Mail.From != "sender@gmail.com" ||
+		got.Mail.To != "kindle@example.com" ||
+		got.Mail.AppPassword != "app password" {
+		t.Fatalf("Mail = %+v", got.Mail)
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -47,6 +58,37 @@ func TestLoadAndSaveAtomic(t *testing.T) {
 	}
 	if strings.Contains(string(data), "version:") {
 		t.Fatalf("bookmarks.yml should not contain version: %s", data)
+	}
+}
+
+func TestLoadMailConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.yml")
+	data := []byte(`mail:
+  from: sender@gmail.com
+  to: kindle@example.com
+  app_password: app password
+users:
+  alice:
+    bookmarks:
+      - https://example.com/1
+    completed: []
+`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mail.From != "sender@gmail.com" {
+		t.Fatalf("From = %q", got.Mail.From)
+	}
+	if got.Mail.To != "kindle@example.com" {
+		t.Fatalf("To = %q", got.Mail.To)
+	}
+	if got.Mail.AppPassword != "app password" {
+		t.Fatalf("AppPassword = %q", got.Mail.AppPassword)
 	}
 }
 
