@@ -5,9 +5,9 @@ markdown 経由で html に変換して epub を生成し、kindle に送る。
 
 ## Todo
 
-- [ ] ファイル名に送信日時を設定
-- [ ] 一定の url 数に達したらメール送信
-  - settings.json 等で管理。ファイル数、チェック日、送信候補、最終送信対象など。
+- [x] ファイル名に生成日時を設定
+- [x] 一定の url 数に達したら epub 生成
+- [ ] メール送信
 
 ## 使い方
 
@@ -25,13 +25,23 @@ go run . --user <はてなID> --from <yyyyMMdd> --css style.css
 ### 定期実行向けの蓄積モード
 
 `--limit` に 1 以上を指定すると、RSS から取得したブックマーク URL を
-実行ファイルと同じディレクトリの `bookmarks.yml` に蓄積する。蓄積 URL 数が
+`bookmarks.yml` に蓄積する。蓄積 URL 数が
 しきい値に達した場合、先頭からしきい値件数だけ EPUB 化し、生成に成功した
 URL を `bookmarks` から `completed` へ移動する。
+
+`--limit` の扱いは次の通り。
+
+- 未指定または `0`: `bookmarks.yml` を使わず、取得したブックマークをすぐ EPUB 化する
+- `1` 以上: `bookmarks.yml` に蓄積し、指定件数に達したらその件数だけ EPUB 化する
+- 蓄積件数が `--limit` 未満の場合: EPUB は生成せず、`queued: <現在件数>/<limit>` を出力して終了する
+
+`--file` で `bookmarks.yml` の位置を指定できる。未指定の場合は、`htb2kdl`
+実行ファイルと同じディレクトリの `bookmarks.yml` を生成・更新する。
 
 ```sh
 go build -o htb2kdl .
 ./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5
+./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5 --file /path/to/bookmarks.yml
 ```
 
 `bookmarks.yml` は次の形式で管理する。

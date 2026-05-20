@@ -73,23 +73,36 @@ func TestLoadStylesheetReportsCSSReadError(t *testing.T) {
 	}
 }
 
-func TestParseArgsThreshold(t *testing.T) {
-	opts, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "5"})
+func TestParseArgsLimitAndFile(t *testing.T) {
+	opts, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "5", "--file", "queue.yml"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.limit != 5 {
 		t.Fatalf("limit = %d, want 5", opts.limit)
 	}
+	if opts.file != "queue.yml" {
+		t.Fatalf("file = %q, want queue.yml", opts.file)
+	}
 }
 
-func TestParseArgsRejectsNegativeThreshold(t *testing.T) {
+func TestParseArgsRejectsNegativeLimit(t *testing.T) {
 	_, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "--limit は 0 以上で指定してください") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveBookmarksPathPrefersFileOption(t *testing.T) {
+	got, err := resolveBookmarksPath(options{file: "custom.yml"}, runConfig{bookmarksPath: "config.yml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "custom.yml" {
+		t.Fatalf("path = %q, want custom.yml", got)
 	}
 }
 

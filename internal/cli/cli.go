@@ -29,6 +29,7 @@ type options struct {
 	from  time.Time
 	out   string
 	css   string
+	file  string
 	limit int
 }
 
@@ -82,7 +83,7 @@ func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stde
 }
 
 func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer) error {
-	bookmarksPath, err := resolveBookmarksPath(cfg)
+	bookmarksPath, err := resolveBookmarksPath(opts, cfg)
 	if err != nil {
 		return err
 	}
@@ -225,7 +226,10 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 	return nil
 }
 
-func resolveBookmarksPath(cfg runConfig) (string, error) {
+func resolveBookmarksPath(opts options, cfg runConfig) (string, error) {
+	if opts.file != "" {
+		return opts.file, nil
+	}
 	if cfg.bookmarksPath != "" {
 		return cfg.bookmarksPath, nil
 	}
@@ -268,6 +272,7 @@ func parseArgs(args []string) (options, error) {
 	fs.StringVar(&opts.user, "user", "", "Hatena user ID")
 	fs.StringVar(&opts.out, "out", "", "output EPUB path")
 	fs.StringVar(&opts.css, "css", "", "CSS file path for EPUB styling")
+	fs.StringVar(&opts.file, "file", "", "bookmarks.yml path for queued mode")
 	fs.IntVar(&opts.limit, "limit", 0, "number of queued bookmarks required to generate EPUB")
 	from := fs.String("from", "", "bookmark date lower bound in yyyyMMdd")
 

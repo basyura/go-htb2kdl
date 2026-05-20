@@ -35,8 +35,9 @@
    - `--limit` 未指定または `0` の場合は従来モード、
      `1` 以上の場合は蓄積モードとして扱う。
    - `--from` は従来互換のため維持し、定期実行時の初回取得範囲として使う。
-   - `--bookmarks-file` 引数は追加せず、蓄積モードでは常に
-     htb2kdl の実行ファイルと同じディレクトリにある `bookmarks.yml` を使用する。
+   - `--file` で蓄積モードに使用する `bookmarks.yml` のパスを指定できるようにする。
+   - `--file` 未指定時は、htb2kdl の実行ファイルと同じディレクトリにある
+     `bookmarks.yml` を使用する。
 
 4. 実行フローを整理する。
    - 蓄積モードでは、先に `bookmarks.yml` を読み込む。
@@ -76,13 +77,14 @@
    - `bookmarks.yml` が存在するが読み込みや YAML 解析に失敗した場合は
      エラー終了し、RSS 取得や EPUB 生成は行わず、`bookmarks.yml` も変更しない。
    - URL の重複判定は正規化せず、RSS から得た URL 文字列の完全一致で行う。
-   - `bookmarks.yml` のパスは `os.Executable()` から実行ファイルの場所を取得して決める。
+   - `bookmarks.yml` のパスは `--file` 指定があればその値を使い、
+     未指定の場合は `os.Executable()` から実行ファイルの場所を取得して決める。
    - `--limit` 未指定または `0` の場合は従来通り RSS 取得分を即 EPUB 化し、
      `bookmarks.yml` は使用しない。
 
 5. テストを追加・更新する。
    - YAML の読み書き、重複排除、URL 追加、生成後の `completed` 移動をテストする。
-   - CLI のオプション解析としきい値判定をテストする。
+   - CLI のオプション解析、`--file` のパス指定、しきい値判定をテストする。
    - 記事取得に失敗した URL でもエラーページ章が生成され、
      EPUB 化済みとして `completed` 移動対象になることをテストする。
 
@@ -94,4 +96,4 @@
 
 - `go test ./...`
 - 必要に応じて `go build -o htb2kdl .` でビルドし、
-  `./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit <数>` で動作確認する。
+  `./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit <数> --file <bookmarks.yml>` で動作確認する。
