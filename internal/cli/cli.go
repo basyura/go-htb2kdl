@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"htb2kdl/internal/book"
@@ -351,10 +353,28 @@ func parseArgs(args []string) (options, error) {
 		return opts, errors.New("--from は必須です")
 	}
 
-	parsed, err := time.ParseInLocation(dateLayout, *from, time.Local)
+	parsed, err := parseFromDate(*from, time.Now())
 	if err != nil {
-		return opts, fmt.Errorf("--from は yyyyMMdd 形式で指定してください: %w", err)
+		return opts, err
 	}
 	opts.from = parsed
 	return opts, nil
+}
+
+func parseFromDate(value string, today time.Time) (time.Time, error) {
+	if strings.HasPrefix(value, "-") {
+		days, err := strconv.Atoi(value)
+		if err != nil || days >= 0 {
+			return time.Time{}, errors.New("--from は yyyyMMdd 形式または -n 形式で指定してください")
+		}
+		localToday := today.In(time.Local)
+		year, month, day := localToday.Date()
+		return time.Date(year, month, day, 0, 0, 0, 0, time.Local).AddDate(0, 0, days), nil
+	}
+
+	parsed, err := time.ParseInLocation(dateLayout, value, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--from は yyyyMMdd 形式または -n 形式で指定してください: %w", err)
+	}
+	return parsed, nil
 }

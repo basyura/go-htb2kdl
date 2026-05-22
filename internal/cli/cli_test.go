@@ -96,6 +96,30 @@ func TestParseArgsSend(t *testing.T) {
 	}
 }
 
+func TestParseFromDateAcceptsRelativeNegativeDays(t *testing.T) {
+	today := time.Date(2026, 5, 22, 15, 30, 0, 0, time.Local)
+
+	got, err := parseFromDate("-2", today)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := time.Date(2026, 5, 20, 0, 0, 0, 0, time.Local)
+	if !got.Equal(want) {
+		t.Fatalf("from = %v, want %v", got, want)
+	}
+}
+
+func TestParseFromDateRejectsInvalidRelativeDays(t *testing.T) {
+	_, err := parseFromDate("-0", time.Date(2026, 5, 22, 0, 0, 0, 0, time.Local))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "--from は yyyyMMdd 形式または -n 形式で指定してください") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestParseArgsRejectsNegativeLimit(t *testing.T) {
 	_, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "-1"})
 	if err == nil {
