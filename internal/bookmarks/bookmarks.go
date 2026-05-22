@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const maxCompletedURLs = 100
+
 type File struct {
 	Mail  MailConfig      `yaml:"mail,omitempty"`
 	Users map[string]User `yaml:"users"`
@@ -99,6 +101,9 @@ func (f *File) CompleteFirst(user string, count int) {
 		}
 		entry.Completed = append(entry.Completed, url)
 		seen[url] = struct{}{}
+	}
+	if len(entry.Completed) > maxCompletedURLs {
+		entry.Completed = append([]string(nil), entry.Completed[len(entry.Completed)-maxCompletedURLs:]...)
 	}
 
 	if count == len(entry.Bookmarks) {

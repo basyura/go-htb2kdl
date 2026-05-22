@@ -40,3 +40,25 @@ go test ./...
 
 - CLI 引数の解釈のみ。
 - Hatena RSS の取得や EPUB 生成処理には直接手を入れない。
+
+## 追加修正: completed の保持件数制限
+
+### 目的
+
+`bookmarks.yml` の `completed` に残す URL は、直近追加した 100 件を
+上限にする。100 件を超えた場合は古い URL から削除する。
+
+### 修正案
+
+1. `internal/bookmarks/bookmarks.go` に `completed` の最大保持件数を
+   定数として定義する。
+2. `CompleteFirst` で URL を `completed` に追加した後、100 件を超えた
+   分を先頭から削除する。
+3. 重複除外の既存挙動は維持する。
+4. `internal/bookmarks/bookmarks_test.go` に 100 件上限のテストを追加する。
+
+### 確認方法
+
+```sh
+go test ./...
+```

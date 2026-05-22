@@ -1,6 +1,7 @@
 package bookmarks
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -120,6 +121,37 @@ func TestCompleteFirst(t *testing.T) {
 	completed := []string{"https://example.com/1", "https://example.com/2"}
 	if !reflect.DeepEqual(file.Users["alice"].Completed, completed) {
 		t.Fatalf("Completed = %v, want %v", file.Users["alice"].Completed, completed)
+	}
+}
+
+func TestCompleteFirstKeepsLatestCompletedURLs(t *testing.T) {
+	file := File{
+		Users: map[string]User{
+			"alice": {
+				Completed: make([]string, 99),
+			},
+		},
+	}
+	for i := range file.Users["alice"].Completed {
+		file.Users["alice"].Completed[i] = fmt.Sprintf("https://example.com/completed-%03d", i+1)
+	}
+	file.Add("alice", []string{
+		"https://example.com/new-1",
+		"https://example.com/new-2",
+	})
+
+	file.CompleteFirst("alice", 2)
+
+	completed := file.Users["alice"].Completed
+	if len(completed) != maxCompletedURLs {
+		t.Fatalf("len(Completed) = %d, want %d", len(completed), maxCompletedURLs)
+	}
+	if completed[0] != "https://example.com/completed-002" {
+		t.Fatalf("first completed = %q", completed[0])
+	}
+	if completed[98] != "https://example.com/new-1" ||
+		completed[99] != "https://example.com/new-2" {
+		t.Fatalf("latest completed = %v", completed[98:])
 	}
 }
 
