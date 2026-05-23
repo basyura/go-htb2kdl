@@ -358,21 +358,20 @@ func normalizeEPUB(path string, stylesheet []byte) error {
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
 
 	entries := make([]zipEntry, 0, len(reader.File))
 	for _, file := range reader.File {
 		rc, err := file.Open()
 		if err != nil {
-			return err
+			return closeZipReader(reader, err)
 		}
 		data, readErr := io.ReadAll(rc)
 		closeErr := rc.Close()
 		if readErr != nil {
-			return readErr
+			return closeZipReader(reader, readErr)
 		}
 		if closeErr != nil {
-			return closeErr
+			return closeZipReader(reader, closeErr)
 		}
 
 		switch file.Name {
@@ -396,6 +395,9 @@ func normalizeEPUB(path string, stylesheet []byte) error {
 			method: file.Method,
 			data:   data,
 		})
+	}
+	if err := reader.Close(); err != nil {
+		return err
 	}
 	if uid := packageIdentifier(entries); uid != "" {
 		for i := range entries {
@@ -448,6 +450,13 @@ func normalizeEPUB(path string, stylesheet []byte) error {
 		return err
 	}
 	return nil
+}
+
+func closeZipReader(reader *zip.ReadCloser, err error) error {
+	if closeErr := reader.Close(); closeErr != nil && err == nil {
+		return closeErr
+	}
+	return err
 }
 
 func writeEntry(writer *zip.Writer, entry zipEntry) error {
