@@ -1,4 +1,5 @@
-htb2kdl
+*.exe
 *.epub
+htb2kdl
 .DS_Store
 bookmarks.yml
