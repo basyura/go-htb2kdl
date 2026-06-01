@@ -45,7 +45,7 @@ type Options struct {
 }
 
 func DefaultOutputPath(user string, created time.Time) string {
-	name := fmt.Sprintf("hateb-%s-%s.epub", safeName(user), created.Format("200601021504"))
+	name := fmt.Sprintf("hateb-%s-%s.epub", safeName(user), created.Format("20060102-1504"))
 	return filepath.Clean(name)
 }
 

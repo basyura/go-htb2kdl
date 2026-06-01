@@ -139,7 +139,7 @@ func TestWrite(t *testing.T) {
 func TestDefaultOutputPathUsesCreatedTimestamp(t *testing.T) {
 	created := time.Date(2026, 5, 18, 18, 1, 30, 0, time.UTC)
 	got := DefaultOutputPath("basyura", created)
-	want := "hateb-basyura-202605181801.epub"
+	want := "hateb-basyura-20260518-1801.epub"
 	if got != want {
 		t.Fatalf("DefaultOutputPath = %q, want %q", got, want)
 	}
