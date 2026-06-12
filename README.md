@@ -15,6 +15,14 @@ markdown 経由で html に変換して epub を生成し、kindle に送る。
 go run . --user <はてなID> --from <yyyyMMdd>
 ```
 
+`--from` には `20260520` のような `yyyyMMdd` 形式の日付、または
+`-2` のような相対日数を指定できる。相対日数は実行日を基準に n 日前の
+0:00 を開始日として扱う。
+
+```sh
+go run . --user <はてなID> --from -2
+```
+
 EPUB には同梱の `style.css` が既定で適用される。
 任意の CSS を適用する場合は `--css` で CSS ファイルを指定する。
 
@@ -50,7 +58,7 @@ URL を `bookmarks` から `completed` へ移動する。
 go build -o htb2kdl .
 ./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5
 ./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5 --file /path/to/bookmarks.yml
-./htb2kdl --user <はてなID> --from <yyyyMMdd> --limit 5 --send
+./htb2kdl --user basyura --from -2 --limit 10 --send
 ```
 
 `bookmarks.yml` は次の形式で管理する。
