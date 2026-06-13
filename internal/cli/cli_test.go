@@ -168,7 +168,7 @@ func TestBuildChaptersIncludesFailureChapter(t *testing.T) {
 	bookmarks := []hatena.Bookmark{{URL: "://bad-url"}}
 	var stderr strings.Builder
 
-	chapters, err := buildChapters(context.Background(), nil, bookmarks, true, &stderr)
+	chapters, err := buildChapters(context.Background(), nil, bookmarks, true, &stderr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestBuildChaptersWithoutFailureChapterReportsEmpty(t *testing.T) {
 	bookmarks := []hatena.Bookmark{{URL: "://bad-url"}}
 	var stderr strings.Builder
 
-	_, err := buildChapters(context.Background(), nil, bookmarks, false, &stderr)
+	_, err := buildChapters(context.Background(), nil, bookmarks, false, &stderr, nil)
 	if !errors.Is(err, errNoChapters) {
 		t.Fatalf("err = %v, want errNoChapters", err)
 	}

@@ -40,6 +40,7 @@ type options struct {
 type runConfig struct {
 	defaultStylesheet []byte
 	bookmarksPath     string
+	logPath           string
 }
 
 type RunOption func(*runConfig)
@@ -61,29 +62,46 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 		return err
 	}
 
-	if opts.limit > 0 {
-		return runQueued(ctx, opts, cfg, stdout, stderr)
+	logPath := cfg.logPath
+	if logPath == "" {
+		logPath, err = defaultLogPath()
+		if err != nil {
+			return err
+		}
 	}
-	return runImmediate(ctx, opts, cfg, stdout, stderr)
+	logger, closer, err := newRuntimeLogger(stdout, logPath)
+	if err != nil {
+		return err
+	}
+	defer closer.Close()
+	logger.PrintStartBanner(time.Now())
+	logger.Printf("実行を開始しました user=%s from=%s", opts.user, opts.from.Format(dateLayout))
+
+	if opts.limit > 0 {
+		return runQueued(ctx, opts, cfg, stdout, stderr, logger)
+	}
+	return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
 }
 
-func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer) error {
+func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 	hatenaClient := hatena.NewClient(client)
+	logger.Printf("はてなブックマーク RSS を取得します")
 	bookmarks, err := hatenaClient.FetchBookmarks(ctx, opts.user, opts.from)
 	if err != nil {
 		return err
 	}
+	logger.Printf("はてなブックマーク RSS を取得しました count=%d", len(bookmarks))
 	if len(bookmarks) == 0 {
 		return errors.New("対象のブックマークがありません")
 	}
 	sortBookmarksOldestFirst(bookmarks)
 
-	chapters, err := buildChapters(ctx, client, bookmarks, false, stderr)
+	chapters, err := buildChapters(ctx, client, bookmarks, false, stderr, logger)
 	if err != nil {
 		return err
 	}
-	out, err := writeBook(ctx, client, opts, cfg, chapters, stdout)
+	out, err := writeBook(ctx, client, opts, cfg, chapters, stdout, logger)
 	if err != nil {
 		return err
 	}
@@ -92,18 +110,19 @@ func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stde
 		if err != nil {
 			return err
 		}
-		if err := sendBook(ctx, opts, mailConfig, out, stdout); err != nil {
+		if err := sendBook(ctx, opts, mailConfig, out, stdout, logger); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer) error {
+func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger) error {
 	bookmarksPath, err := resolveBookmarksPath(opts, cfg)
 	if err != nil {
 		return err
 	}
+	logger.Printf("キューファイルを読み込みます path=%s", bookmarksPath)
 
 	queue, err := bookmarkfile.Load(bookmarksPath)
 	if err != nil {
@@ -112,10 +131,12 @@ func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr 
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	hatenaClient := hatena.NewClient(client)
+	logger.Printf("はてなブックマーク RSS を取得します")
 	fetched, err := hatenaClient.FetchBookmarks(ctx, opts.user, opts.from)
 	if err != nil {
 		return err
 	}
+	logger.Printf("はてなブックマーク RSS を取得しました count=%d", len(fetched))
 	sortBookmarksOldestFirst(fetched)
 
 	urls := make([]string, 0, len(fetched))
@@ -125,6 +146,7 @@ func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr 
 	queue.Add(opts.user, urls)
 
 	queued := queue.Queued(opts.user)
+	logger.Printf("キューに URL を追加しました added=%d queued=%d limit=%d", len(urls), len(queued), opts.limit)
 	if len(queued) < opts.limit {
 		if err := bookmarkfile.SaveAtomic(bookmarksPath, queue); err != nil {
 			return err
@@ -139,31 +161,33 @@ func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr 
 		targets = append(targets, hatena.Bookmark{URL: url})
 	}
 
-	chapters, err := buildChapters(ctx, client, targets, true, stderr)
+	chapters, err := buildChapters(ctx, client, targets, true, stderr, logger)
 	if err != nil {
 		return err
 	}
-	out, err := writeBook(ctx, client, opts, cfg, chapters, stdout)
+	out, err := writeBook(ctx, client, opts, cfg, chapters, stdout, logger)
 	if err != nil {
 		return err
 	}
 	if opts.send {
-		if err := sendBook(ctx, opts, queue.Mail, out, stdout); err != nil {
+		if err := sendBook(ctx, opts, queue.Mail, out, stdout, logger); err != nil {
 			return err
 		}
 	}
 
 	queue.CompleteFirst(opts.user, opts.limit)
+	logger.Printf("キューを更新します completed=%d", opts.limit)
 	return bookmarkfile.SaveAtomic(bookmarksPath, queue)
 }
 
-func buildChapters(ctx context.Context, client *http.Client, bookmarks []hatena.Bookmark, includeFailureChapters bool, stderr io.Writer) ([]book.Chapter, error) {
+func buildChapters(ctx context.Context, client *http.Client, bookmarks []hatena.Bookmark, includeFailureChapters bool, stderr io.Writer, logger *runtimeLogger) ([]book.Chapter, error) {
 	extractor := content.NewExtractor(client)
 	converter := convert.NewMarkdownConverter()
 	chapters := make([]book.Chapter, 0, len(bookmarks))
 	var warnings []error
 
-	for _, bm := range bookmarks {
+	for i, bm := range bookmarks {
+		logger.Printf("記事本文を取得します index=%d/%d url=%s", i+1, len(bookmarks), bm.URL)
 		article, err := extractor.Extract(ctx, bm.URL)
 		if err != nil {
 			warnings = append(warnings, fmt.Errorf("%s: %w", bm.URL, err))
@@ -204,6 +228,7 @@ func buildChapters(ctx context.Context, client *http.Client, bookmarks []hatena.
 	if len(chapters) == 0 {
 		return nil, errNoChapters
 	}
+	logger.Printf("記事本文の処理が完了しました chapters=%d warnings=%d", len(chapters), len(warnings))
 	return chapters, nil
 }
 
@@ -220,7 +245,7 @@ func failedChapter(targetURL string, err error) book.Chapter {
 	}
 }
 
-func writeBook(ctx context.Context, client *http.Client, opts options, cfg runConfig, chapters []book.Chapter, stdout io.Writer) (string, error) {
+func writeBook(ctx context.Context, client *http.Client, opts options, cfg runConfig, chapters []book.Chapter, stdout io.Writer, logger *runtimeLogger) (string, error) {
 	created := time.Now()
 	out := opts.out
 	if out == "" {
@@ -232,6 +257,7 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 		return "", err
 	}
 
+	logger.Printf("EPUB を生成します output=%s chapters=%d", out, len(chapters))
 	if err := book.Write(book.Options{
 		Title:      fmt.Sprintf("%s のはてなブックマーク", opts.user),
 		Author:     opts.user,
@@ -261,12 +287,13 @@ func loadMailConfig(opts options, cfg runConfig) (bookmarkfile.MailConfig, error
 	return file.Mail, nil
 }
 
-func sendBook(ctx context.Context, opts options, cfg bookmarkfile.MailConfig, out string, stdout io.Writer) error {
+func sendBook(ctx context.Context, opts options, cfg bookmarkfile.MailConfig, out string, stdout io.Writer, logger *runtimeLogger) error {
 	mailConfig := mail.Config{
 		From:        cfg.From,
 		To:          cfg.To,
 		AppPassword: cfg.AppPassword,
 	}
+	logger.Printf("EPUB をメール送信します to=%s path=%s", cfg.To, out)
 	if err := mail.SendEPUB(ctx, mailConfig, mail.EPUBMessage{
 		Subject: fmt.Sprintf("%s のはてなブックマーク", opts.user),
 		Body:    "生成した EPUB を送信します。",

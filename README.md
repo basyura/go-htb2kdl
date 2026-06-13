@@ -30,6 +30,10 @@ EPUB には同梱の `style.css` が既定で適用される。
 go run . --user <はてなID> --from <yyyyMMdd> --css style.css
 ```
 
+実行時のログは標準出力に出力される。また、実行ファイルと同じディレクトリの
+`htb2kdl.log` にも出力される。ログファイルが 5MiB を超える場合は
+`htb2kdl.log.1` から `htb2kdl.log.3` まで 3 世代でローテーションする。
+
 `--send` を指定すると、生成した EPUB を Gmail の SMTP サーバー経由で
 送信する。送信先と Gmail のアプリパスワードは `bookmarks.yml` の `mail`
 に設定する。
