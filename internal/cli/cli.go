@@ -89,6 +89,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	if err != nil {
 		return err
 	}
+	hasBookmarks, err := fileExists(bookmarksPath)
+	if err != nil {
+		return err
+	}
+	if !hasBookmarks {
+		return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
+	}
 	queue, err := bookmarkfile.Load(bookmarksPath)
 	if err != nil {
 		return err
@@ -99,6 +106,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	}
 
 	return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
+}
+
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("bookmarks.yml の確認に失敗しました: %w", err)
 }
 
 func applyBookmarksLimit(opts options, queue bookmarkfile.File) options {

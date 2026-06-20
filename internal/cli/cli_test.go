@@ -198,6 +198,31 @@ func TestResolveBookmarksPathPrefersFileOption(t *testing.T) {
 	}
 }
 
+func TestFileExistsReportsMissingFileAsFalse(t *testing.T) {
+	got, err := fileExists(filepath.Join(t.TempDir(), "missing.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got {
+		t.Fatal("fileExists = true, want false")
+	}
+}
+
+func TestFileExistsReportsExistingFileAsTrue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.yml")
+	if err := os.WriteFile(path, []byte("users: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := fileExists(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Fatal("fileExists = false, want true")
+	}
+}
+
 func TestRemoveSentBook(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.epub")
 	if err := os.WriteFile(path, []byte("epub"), 0o644); err != nil {
