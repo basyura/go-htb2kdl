@@ -44,16 +44,20 @@ go run . --user <はてなID> --from <yyyyMMdd> --send
 
 ### 定期実行向けの蓄積モード
 
-`--limit` に 1 以上を指定すると、RSS から取得したブックマーク URL を
+`--limit` に 1 以上を指定するか、`bookmarks.yml` の `settings.limit` に
+1 以上を設定すると、RSS から取得したブックマーク URL を
 `bookmarks.yml` に蓄積する。蓄積 URL 数が
 しきい値に達した場合、先頭からしきい値件数だけ EPUB 化し、生成に成功した
 URL を `bookmarks` から `completed` へ移動する。
 
 `--limit` の扱いは次の通り。
 
-- 未指定または `0`: `bookmarks.yml` を使わず、取得したブックマークをすぐ EPUB 化する
+- 未指定: `settings.limit` が 1 以上ならその値を使い、未設定または `0` なら取得したブックマークをすぐ EPUB 化する
+- `0`: `settings.limit` は使わず、取得したブックマークをすぐ EPUB 化する
 - `1` 以上: `bookmarks.yml` に蓄積し、指定件数に達したらその件数だけ EPUB 化する
 - 蓄積件数が `--limit` 未満の場合: EPUB は生成せず、`queued: <現在件数>/<limit>` を出力して終了する
+
+`--limit` を指定した場合は、`settings.limit` より実行時引数を優先する。
 
 `--file` で `bookmarks.yml` の位置を指定できる。未指定の場合は、`htb2kdl`
 実行ファイルと同じディレクトリの `bookmarks.yml` を生成・更新する。
@@ -68,6 +72,8 @@ go build -o htb2kdl .
 `bookmarks.yml` は次の形式で管理する。
 
 ```yaml
+settings:
+  limit: 10
 mail:
   from: "sender@gmail.com"
   to: "kindle@example.com"

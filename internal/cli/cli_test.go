@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	bookmarkfile "htb2kdl/internal/bookmarks"
 	"htb2kdl/internal/hatena"
 )
 
@@ -84,6 +85,22 @@ func TestParseArgsLimitAndFile(t *testing.T) {
 	if opts.file != "queue.yml" {
 		t.Fatalf("file = %q, want queue.yml", opts.file)
 	}
+	if !opts.limitSpecified {
+		t.Fatal("limitSpecified = false, want true")
+	}
+}
+
+func TestParseArgsDetectsExplicitZeroLimit(t *testing.T) {
+	opts, err := parseArgs([]string{"--user", "alice", "--from", "20260520", "--limit", "0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.limit != 0 {
+		t.Fatalf("limit = %d, want 0", opts.limit)
+	}
+	if !opts.limitSpecified {
+		t.Fatal("limitSpecified = false, want true")
+	}
 }
 
 func TestParseArgsSend(t *testing.T) {
@@ -93,6 +110,47 @@ func TestParseArgsSend(t *testing.T) {
 	}
 	if !opts.send {
 		t.Fatal("send = false, want true")
+	}
+}
+
+func TestApplyBookmarksLimitUsesYAMLWhenLimitIsNotSpecified(t *testing.T) {
+	limit := 10
+	opts := applyBookmarksLimit(options{}, bookmarkfile.File{
+		Settings: bookmarkfile.SettingsConfig{Limit: &limit},
+	})
+
+	if opts.limit != 10 {
+		t.Fatalf("limit = %d, want 10", opts.limit)
+	}
+}
+
+func TestApplyBookmarksLimitKeepsExplicitLimit(t *testing.T) {
+	limit := 10
+	opts := applyBookmarksLimit(options{limit: 5, limitSpecified: true}, bookmarkfile.File{
+		Settings: bookmarkfile.SettingsConfig{Limit: &limit},
+	})
+
+	if opts.limit != 5 {
+		t.Fatalf("limit = %d, want 5", opts.limit)
+	}
+}
+
+func TestApplyBookmarksLimitKeepsExplicitZeroLimit(t *testing.T) {
+	limit := 10
+	opts := applyBookmarksLimit(options{limitSpecified: true}, bookmarkfile.File{
+		Settings: bookmarkfile.SettingsConfig{Limit: &limit},
+	})
+
+	if opts.limit != 0 {
+		t.Fatalf("limit = %d, want 0", opts.limit)
+	}
+}
+
+func TestApplyBookmarksLimitIgnoresMissingYAMLLimit(t *testing.T) {
+	opts := applyBookmarksLimit(options{}, bookmarkfile.File{})
+
+	if opts.limit != 0 {
+		t.Fatalf("limit = %d, want 0", opts.limit)
 	}
 }
 

@@ -21,7 +21,9 @@ func TestLoadMissingFile(t *testing.T) {
 
 func TestLoadAndSaveAtomic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bookmarks.yml")
+	limit := 10
 	file := File{
+		Settings: SettingsConfig{Limit: &limit},
 		Mail: MailConfig{
 			From:        "sender@gmail.com",
 			To:          "kindle@example.com",
@@ -47,6 +49,9 @@ func TestLoadAndSaveAtomic(t *testing.T) {
 	if !reflect.DeepEqual(completed, []string{"https://example.com/1"}) {
 		t.Fatalf("Completed = %v", completed)
 	}
+	if got.Settings.Limit == nil || *got.Settings.Limit != 10 {
+		t.Fatalf("Settings.Limit = %v, want 10", got.Settings.Limit)
+	}
 	if got.Mail.From != "sender@gmail.com" ||
 		got.Mail.To != "kindle@example.com" ||
 		got.Mail.AppPassword != "app password" {
@@ -59,6 +64,43 @@ func TestLoadAndSaveAtomic(t *testing.T) {
 	}
 	if strings.Contains(string(data), "version:") {
 		t.Fatalf("bookmarks.yml should not contain version: %s", data)
+	}
+}
+
+func TestLoadSettingsLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.yml")
+	data := []byte(`settings:
+  limit: 10
+users: {}
+`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Settings.Limit == nil {
+		t.Fatal("Settings.Limit is nil")
+	}
+	if *got.Settings.Limit != 10 {
+		t.Fatalf("Settings.Limit = %d, want 10", *got.Settings.Limit)
+	}
+}
+
+func TestSaveAtomicOmitsEmptySettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.yml")
+	if err := SaveAtomic(path, File{}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "settings:") {
+		t.Fatalf("bookmarks.yml should not contain empty settings: %s", data)
 	}
 }
 
@@ -166,6 +208,25 @@ func TestLoadReportsInvalidYAML(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "bookmarks.yml の解析に失敗しました") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadReportsNegativeSettingsLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.yml")
+	data := []byte(`settings:
+  limit: -1
+users: {}
+`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "settings.limit は 0 以上で指定してください") {
 		t.Fatalf("error = %v", err)
 	}
 }

@@ -12,8 +12,13 @@ import (
 const maxCompletedURLs = 100
 
 type File struct {
-	Mail  MailConfig      `yaml:"mail,omitempty"`
-	Users map[string]User `yaml:"users"`
+	Settings SettingsConfig  `yaml:"settings,omitempty"`
+	Mail     MailConfig      `yaml:"mail,omitempty"`
+	Users    map[string]User `yaml:"users"`
+}
+
+type SettingsConfig struct {
+	Limit *int `yaml:"limit,omitempty"`
 }
 
 type MailConfig struct {
@@ -39,6 +44,9 @@ func Load(path string) (File, error) {
 	var file File
 	if err := yaml.Unmarshal(data, &file); err != nil {
 		return File{}, fmt.Errorf("bookmarks.yml の解析に失敗しました: %w", err)
+	}
+	if file.Settings.Limit != nil && *file.Settings.Limit < 0 {
+		return File{}, errors.New("bookmarks.yml の settings.limit は 0 以上で指定してください")
 	}
 	if file.Users == nil {
 		file.Users = make(map[string]User)

@@ -28,13 +28,14 @@ const dateLayout = "20060102"
 var errNoChapters = errors.New("EPUB に含められる記事がありません")
 
 type options struct {
-	user  string
-	from  time.Time
-	out   string
-	css   string
-	file  string
-	limit int
-	send  bool
+	user           string
+	from           time.Time
+	out            string
+	css            string
+	file           string
+	limit          int
+	limitSpecified bool
+	send           bool
 }
 
 type runConfig struct {
@@ -77,10 +78,37 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	logger.PrintStartBanner(time.Now())
 	logger.Printf("実行を開始しました user=%s from=%s", opts.user, opts.from.Format(dateLayout))
 
-	if opts.limit > 0 {
-		return runQueued(ctx, opts, cfg, stdout, stderr, logger)
+	if opts.limitSpecified {
+		if opts.limit > 0 {
+			return runQueued(ctx, opts, cfg, stdout, stderr, logger)
+		}
+		return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
 	}
+
+	bookmarksPath, err := resolveBookmarksPath(opts, cfg)
+	if err != nil {
+		return err
+	}
+	queue, err := bookmarkfile.Load(bookmarksPath)
+	if err != nil {
+		return err
+	}
+	opts = applyBookmarksLimit(opts, queue)
+	if opts.limit > 0 {
+		return runQueuedWithQueue(ctx, opts, cfg, stdout, stderr, logger, bookmarksPath, queue)
+	}
+
 	return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
+}
+
+func applyBookmarksLimit(opts options, queue bookmarkfile.File) options {
+	if opts.limitSpecified {
+		return opts
+	}
+	if queue.Settings.Limit != nil && *queue.Settings.Limit > 0 {
+		opts.limit = *queue.Settings.Limit
+	}
+	return opts
 }
 
 func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger) error {
@@ -128,7 +156,10 @@ func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr 
 	if err != nil {
 		return err
 	}
+	return runQueuedWithQueue(ctx, opts, cfg, stdout, stderr, logger, bookmarksPath, queue)
+}
 
+func runQueuedWithQueue(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger, bookmarksPath string, queue bookmarkfile.File) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 	hatenaClient := hatena.NewClient(client)
 	logger.Printf("はてなブックマーク RSS を取得します")
@@ -376,6 +407,11 @@ func parseArgs(args []string) (options, error) {
 	if opts.limit < 0 {
 		return opts, errors.New("--limit は 0 以上で指定してください")
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "limit" {
+			opts.limitSpecified = true
+		}
+	})
 	if *from == "" {
 		return opts, errors.New("--from は必須です")
 	}
