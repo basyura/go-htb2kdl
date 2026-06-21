@@ -26,6 +26,7 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
+// Chapter represents one article chapter in the generated EPUB.
 type Chapter struct {
 	Title        string
 	URL          string
@@ -33,6 +34,7 @@ type Chapter struct {
 	HTMLBody     string
 }
 
+// Options contains all inputs required to write an EPUB.
 type Options struct {
 	Title      string
 	Author     string
@@ -44,11 +46,14 @@ type Options struct {
 	HTTPClient *http.Client
 }
 
+// DefaultOutputPath builds the default EPUB filename for a user and timestamp.
 func DefaultOutputPath(user string, created time.Time) string {
 	name := fmt.Sprintf("hateb-%s-%s.epub", safeName(user), created.Format("20060102-1504"))
 	return filepath.Clean(name)
 }
 
+// Write creates an EPUB from the supplied chapters and normalizes the generated
+// archive.
 func Write(opts Options) error {
 	if len(opts.Chapters) == 0 {
 		return fmt.Errorf("章がありません")
@@ -120,17 +125,21 @@ func Write(opts Options) error {
 	return nil
 }
 
+// zipEntry stores one ZIP archive entry while the EPUB is being normalized.
 type zipEntry struct {
 	name   string
 	method uint16
 	data   []byte
 }
 
+// chapterImage stores image data embedded from a chapter.
 type chapterImage struct {
 	Name string
 	Data []byte
 }
 
+// embedChapterImages downloads supported chapter images, embeds them, and
+// rewrites image references to EPUB-local paths.
 func embedChapterImages(ctx context.Context, client *http.Client, chapter Chapter, chapterNo int, cache map[string]string) ([]chapterImage, string) {
 	if !strings.Contains(chapter.HTMLBody, "<img") {
 		return nil, chapter.HTMLBody
@@ -183,6 +192,7 @@ func embedChapterImages(ctx context.Context, client *http.Client, chapter Chapte
 	return images, strings.TrimSpace(buf.String())
 }
 
+// rewriteImages walks an HTML node tree and rewrites img src attributes.
 func rewriteImages(node *xhtml.Node, rewrite func(string) string) {
 	if node.Type == xhtml.ElementNode && node.Data == "img" {
 		for i := range node.Attr {
@@ -196,6 +206,8 @@ func rewriteImages(node *xhtml.Node, rewrite func(string) string) {
 	}
 }
 
+// rewriteChapterLinks resolves relative links in a chapter body against the
+// original article URL.
 func rewriteChapterLinks(body, baseURL string) string {
 	root := &xhtml.Node{
 		Type:     xhtml.ElementNode,
@@ -228,6 +240,7 @@ func rewriteChapterLinks(body, baseURL string) string {
 	return strings.TrimSpace(buf.String())
 }
 
+// rewriteLinks walks an HTML node tree and rewrites anchor href attributes.
 func rewriteLinks(node *xhtml.Node, rewrite func(string) string) {
 	if node.Type == xhtml.ElementNode && node.Data == "a" {
 		for i := range node.Attr {
@@ -241,6 +254,8 @@ func rewriteLinks(node *xhtml.Node, rewrite func(string) string) {
 	}
 }
 
+// resolveLinkURL resolves a relative link against the chapter base URL and
+// leaves absolute links unchanged.
 func resolveLinkURL(base *url.URL, href string) string {
 	if href == "" {
 		return ""
@@ -258,6 +273,8 @@ func resolveLinkURL(base *url.URL, href string) string {
 	return base.ResolveReference(ref).String()
 }
 
+// resolveImageURL resolves an image source to an HTTP(S) URL suitable for
+// downloading.
 func resolveImageURL(base *url.URL, src string) string {
 	if src == "" || strings.HasPrefix(src, "data:") || strings.HasPrefix(src, "cid:") {
 		return ""
@@ -278,6 +295,8 @@ func resolveImageURL(base *url.URL, src string) string {
 	return ref.String()
 }
 
+// downloadImage fetches an image and returns its bytes and response content
+// type.
 func downloadImage(ctx context.Context, client *http.Client, imageURL string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
@@ -303,12 +322,16 @@ func downloadImage(ctx context.Context, client *http.Client, imageURL string) ([
 	return data, resp.Header.Get("Content-Type"), nil
 }
 
+// imageFileName builds a stable EPUB image filename from chapter number, source
+// URL, content type, and data.
 func imageFileName(chapterNo int, imageURL, contentType string, data []byte) string {
 	sum := sha1.Sum([]byte(imageURL))
 	ext := imageExtension(imageURL, contentType, data)
 	return fmt.Sprintf("chapter-%03d-%s%s", chapterNo, hex.EncodeToString(sum[:])[:12], ext)
 }
 
+// imageExtension chooses an image extension from URL, content type, or detected
+// bytes.
 func imageExtension(imageURL, contentType string, data []byte) string {
 	if parsed, err := url.Parse(imageURL); err == nil {
 		ext := strings.ToLower(path.Ext(parsed.Path))
@@ -344,6 +367,8 @@ func imageExtension(imageURL, contentType string, data []byte) string {
 	}
 }
 
+// isImageExt reports whether ext is one of the image extensions supported for
+// EPUB embedding.
 func isImageExt(ext string) bool {
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp":
@@ -353,6 +378,8 @@ func isImageExt(ext string) bool {
 	}
 }
 
+// normalizeEPUB rewrites the generated EPUB archive to satisfy reader and
+// epubcheck expectations.
 func normalizeEPUB(path string, stylesheet []byte) error {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
@@ -452,6 +479,8 @@ func normalizeEPUB(path string, stylesheet []byte) error {
 	return nil
 }
 
+// closeZipReader closes the ZIP reader while preserving an existing error when
+// present.
 func closeZipReader(reader *zip.ReadCloser, err error) error {
 	if closeErr := reader.Close(); closeErr != nil && err == nil {
 		return closeErr
@@ -459,6 +488,7 @@ func closeZipReader(reader *zip.ReadCloser, err error) error {
 	return err
 }
 
+// writeEntry writes one ZIP entry with its configured compression method.
 func writeEntry(writer *zip.Writer, entry zipEntry) error {
 	header := &zip.FileHeader{
 		Name:   entry.name,
@@ -472,6 +502,8 @@ func writeEntry(writer *zip.Writer, entry zipEntry) error {
 	return err
 }
 
+// ensurePackageNamespaces adds missing package namespaces and fixes the spine
+// TOC reference.
 func ensurePackageNamespaces(data []byte) []byte {
 	const dcNS = `xmlns:dc="http://purl.org/dc/elements/1.1/"`
 	if !bytes.Contains(data, []byte(dcNS)) {
@@ -480,6 +512,8 @@ func ensurePackageNamespaces(data []byte) []byte {
 	return bytes.Replace(data, []byte(`toc="ncx"`), []byte(`toc="toc"`), 1)
 }
 
+// ensureModifiedMetadata adds dcterms:modified metadata when the EPUB library
+// did not emit it.
 func ensureModifiedMetadata(data []byte) []byte {
 	if bytes.Contains(data, []byte(`property="dcterms:modified"`)) {
 		return data
@@ -495,6 +529,7 @@ func ensureModifiedMetadata(data []byte) []byte {
 	return bytes.Replace(data, []byte(`</metadata>`), []byte("    "+meta+"\n  </metadata>"), 1)
 }
 
+// ensureNCXMetadata normalizes NCX version and required metadata entries.
 func ensureNCXMetadata(data []byte) []byte {
 	data = regexp.MustCompile(`version="[^"]*"`).ReplaceAll(data, []byte(`version="2005-1"`))
 	if bytes.Contains(data, []byte(`<meta name="dtb:uid"`)) {
@@ -504,6 +539,7 @@ func ensureNCXMetadata(data []byte) []byte {
 	return regexp.MustCompile(`<head>\s*</head>`).ReplaceAll(data, []byte(head))
 }
 
+// packageIdentifier extracts the package identifier from content.opf entries.
 func packageIdentifier(entries []zipEntry) string {
 	re := regexp.MustCompile(`<dc:identifier[^>]*\bid="pub-id"[^>]*>([^<]+)</dc:identifier>`)
 	for _, entry := range entries {
@@ -517,11 +553,14 @@ func packageIdentifier(entries []zipEntry) string {
 	return ""
 }
 
+// ensureNCXUID copies the EPUB package identifier into the NCX dtb:uid metadata.
 func ensureNCXUID(data []byte, uid string) []byte {
 	re := regexp.MustCompile(`(<meta name="dtb:uid" content=")[^"]*("></meta>)`)
 	return re.ReplaceAll(data, []byte(`${1}`+html.EscapeString(uid)+`${2}`))
 }
 
+// ensureStylesheetManifest adds style.css to the OPF manifest when a stylesheet
+// is embedded.
 func ensureStylesheetManifest(data []byte) []byte {
 	const item = `<item id="style-css" href="style.css" media-type="text/css"></item>`
 	if bytes.Contains(data, []byte(`href="style.css"`)) {
@@ -530,6 +569,7 @@ func ensureStylesheetManifest(data []byte) []byte {
 	return bytes.Replace(data, []byte(`</manifest>`), []byte(item+"\n  </manifest>"), 1)
 }
 
+// ensureImageMediaTypes corrects manifest media types for embedded image files.
 func ensureImageMediaTypes(data []byte) []byte {
 	replacements := map[string]string{
 		".svg":  "image/svg+xml",
@@ -546,12 +586,15 @@ func ensureImageMediaTypes(data []byte) []byte {
 	return data
 }
 
+// removeCoverImageMetadata removes cover-image metadata that causes validation
+// issues with the generated EPUB structure.
 func removeCoverImageMetadata(data []byte) []byte {
 	data = regexp.MustCompile(`(?m)\s*<meta name="cover" content="[^"]+"></meta>\s*`).ReplaceAll(data, []byte("\n"))
 	data = regexp.MustCompile(`\s+properties="cover-image"`).ReplaceAll(data, nil)
 	return data
 }
 
+// ensureEPUBNamespace adds the EPUB namespace to XHTML files when missing.
 func ensureEPUBNamespace(data []byte) []byte {
 	const epubNS = `xmlns:epub="http://www.idpf.org/2007/ops"`
 	if bytes.Contains(data, []byte(epubNS)) {
@@ -560,11 +603,14 @@ func ensureEPUBNamespace(data []byte) []byte {
 	return bytes.Replace(data, []byte(`<html `), []byte(`<html `+epubNS+` `), 1)
 }
 
+// removeEmptyLandmarks removes empty landmark navigation generated by the EPUB
+// library.
 func removeEmptyLandmarks(data []byte) []byte {
 	re := regexp.MustCompile(`<nav\b[^>]*\bepub:type="landmarks"[^>]*>.*?<ol>\s*</ol>\s*</nav>`)
 	return re.ReplaceAll(data, nil)
 }
 
+// renderChapter renders one article chapter as XHTML.
 func renderChapter(ch Chapter, includeStylesheet bool) string {
 	date := ""
 	if !ch.BookmarkedAt.IsZero() {
@@ -610,6 +656,8 @@ func renderChapter(ch Chapter, includeStylesheet bool) string {
 </html>`
 }
 
+// renderCoverPage renders the XHTML page that displays the generated cover
+// image.
 func renderCoverPage(user string, created time.Time) string {
 	title := "はてブ"
 	if user != "" {
@@ -647,6 +695,7 @@ func renderCoverPage(user string, created time.Time) string {
 </html>`
 }
 
+// renderBookmarksPage renders the XHTML page listing all chapter links.
 func renderBookmarksPage(chapters []Chapter, chapterFiles []string, includeStylesheet bool) string {
 	stylesheet := ""
 	if includeStylesheet {
@@ -687,6 +736,7 @@ func renderBookmarksPage(chapters []Chapter, chapterFiles []string, includeStyle
 </html>`
 }
 
+// safeName converts a user-provided value into a filesystem-safe name segment.
 func safeName(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -696,6 +746,7 @@ func safeName(value string) string {
 	return strings.Trim(re.ReplaceAllString(value, "-"), "-")
 }
 
+// coverImage renders a simple bitmap cover image for the EPUB.
 func coverImage(user string, created time.Time) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, 600, 800))
 	background := color.RGBA{R: 245, G: 245, B: 245, A: 255}
@@ -712,11 +763,13 @@ func coverImage(user string, created time.Time) image.Image {
 	return img
 }
 
+// coverLine describes one line of text drawn on the generated cover.
 type coverLine struct {
 	text           string
 	preferredScale int
 }
 
+// drawCoverLines centers and draws multiple text lines onto the cover image.
 func drawCoverLines(img *image.RGBA, lines []coverLine, c color.Color) {
 	scales := make([]int, 0, len(lines))
 	totalHeight := 0
@@ -741,6 +794,7 @@ func drawCoverLines(img *image.RGBA, lines []coverLine, c color.Color) {
 	}
 }
 
+// coverLineScale chooses the largest scale that keeps a line within maxWidth.
 func coverLineScale(text string, preferredScale, maxWidth int) int {
 	if preferredScale < 1 {
 		preferredScale = 1
@@ -752,6 +806,7 @@ func coverLineScale(text string, preferredScale, maxWidth int) int {
 	return scale
 }
 
+// coverTextWidth returns the pixel width of text rendered with the bitmap font.
 func coverTextWidth(text string, scale int) int {
 	width := 0
 	for range text {
@@ -763,6 +818,7 @@ func coverTextWidth(text string, scale int) int {
 	return width
 }
 
+// drawCoverTextAt draws bitmap-font text at the specified position and scale.
 func drawCoverTextAt(img *image.RGBA, text string, x, y, scale int, c color.Color) {
 	for _, r := range text {
 		rows, ok := coverGlyph(r)
@@ -782,6 +838,7 @@ func drawCoverTextAt(img *image.RGBA, text string, x, y, scale int, c color.Colo
 	}
 }
 
+// fillRect fills a rectangular area in the cover image.
 func fillRect(img *image.RGBA, x, y, w, h int, c color.Color) {
 	for yy := y; yy < y+h; yy++ {
 		for xx := x; xx < x+w; xx++ {
@@ -796,6 +853,7 @@ const (
 	coverGlyphSpacing = 2
 )
 
+// coverGlyph returns bitmap rows for a supported cover glyph.
 func coverGlyph(r rune) ([]string, bool) {
 	rows, ok := coverGlyphs[r]
 	if ok {

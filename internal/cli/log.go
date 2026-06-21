@@ -14,10 +14,13 @@ const (
 	maxLogBackups = 3
 )
 
+// runtimeLogger writes timestamped runtime messages to the configured writer.
 type runtimeLogger struct {
 	writer io.Writer
 }
 
+// newRuntimeLogger creates a logger that writes to stdout and a rotating log
+// file.
 func newRuntimeLogger(stdout io.Writer, logPath string) (*runtimeLogger, io.Closer, error) {
 	file, err := newRotatingLogFile(logPath, maxLogSize, maxLogBackups)
 	if err != nil {
@@ -26,6 +29,7 @@ func newRuntimeLogger(stdout io.Writer, logPath string) (*runtimeLogger, io.Clos
 	return &runtimeLogger{writer: io.MultiWriter(stdout, file)}, file, nil
 }
 
+// Printf writes a timestamped formatted log line.
 func (l *runtimeLogger) Printf(format string, args ...any) {
 	if l == nil || l.writer == nil {
 		return
@@ -34,6 +38,7 @@ func (l *runtimeLogger) Printf(format string, args ...any) {
 	fmt.Fprintf(l.writer, "%s "+format+"\n", append([]any{timestamp}, args...)...)
 }
 
+// PrintStartBanner writes a visual separator for the start of a CLI run.
 func (l *runtimeLogger) PrintStartBanner(startedAt time.Time) {
 	if l == nil || l.writer == nil {
 		return
@@ -43,6 +48,8 @@ func (l *runtimeLogger) PrintStartBanner(startedAt time.Time) {
 	fmt.Fprintf(l.writer, "###############################\n")
 }
 
+// rotatingLogFile appends to a log file and rotates backup files when it grows
+// beyond the configured size.
 type rotatingLogFile struct {
 	path       string
 	maxSize    int64
@@ -51,6 +58,8 @@ type rotatingLogFile struct {
 	size       int64
 }
 
+// newRotatingLogFile opens a rotating log file, creating its directory if
+// needed.
 func newRotatingLogFile(path string, maxSize int64, maxBackups int) (*rotatingLogFile, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("ログディレクトリの作成に失敗しました: %w", err)
@@ -66,6 +75,8 @@ func newRotatingLogFile(path string, maxSize int64, maxBackups int) (*rotatingLo
 	return writer, nil
 }
 
+// Write appends data to the current log file, rotating it before the write when
+// the size limit would be exceeded.
 func (w *rotatingLogFile) Write(p []byte) (int, error) {
 	if w.file == nil {
 		if err := w.open(); err != nil {
@@ -85,6 +96,7 @@ func (w *rotatingLogFile) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// Close closes the current log file if it is open.
 func (w *rotatingLogFile) Close() error {
 	if w.file == nil {
 		return nil
@@ -96,6 +108,8 @@ func (w *rotatingLogFile) Close() error {
 	return nil
 }
 
+// open opens the current log file and rotates an oversized existing file before
+// appending.
 func (w *rotatingLogFile) open() error {
 	info, err := os.Stat(w.path)
 	if err != nil && !os.IsNotExist(err) {
@@ -121,6 +135,7 @@ func (w *rotatingLogFile) open() error {
 	return nil
 }
 
+// rotate closes the active file, rotates backups, and reopens the base log file.
 func (w *rotatingLogFile) rotate() error {
 	if w.file != nil {
 		if err := w.file.Close(); err != nil {
@@ -134,6 +149,8 @@ func (w *rotatingLogFile) rotate() error {
 	return w.open()
 }
 
+// rotateLogFiles shifts numbered backup files and moves the base log to the
+// first backup slot.
 func rotateLogFiles(path string, maxBackups int) error {
 	oldest := fmt.Sprintf("%s.%d", path, maxBackups)
 	if err := os.Remove(oldest); err != nil && !os.IsNotExist(err) {
@@ -154,6 +171,7 @@ func rotateLogFiles(path string, maxBackups int) error {
 	return nil
 }
 
+// defaultLogPath returns the default log path next to the executable.
 func defaultLogPath() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {

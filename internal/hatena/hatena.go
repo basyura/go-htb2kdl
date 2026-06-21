@@ -11,19 +11,24 @@ import (
 	"time"
 )
 
+// DefaultBaseURL is the base URL for Hatena Bookmark.
 const DefaultBaseURL = "https://b.hatena.ne.jp"
 
+// Bookmark represents one item from a Hatena Bookmark RSS feed.
 type Bookmark struct {
 	Title        string
 	URL          string
 	BookmarkedAt time.Time
 }
 
+// Client fetches and filters Hatena Bookmark RSS feeds.
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
 }
 
+// NewClient creates a Hatena Bookmark client using http.DefaultClient when no
+// client is provided.
 func NewClient(httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -34,6 +39,8 @@ func NewClient(httpClient *http.Client) *Client {
 	}
 }
 
+// FetchBookmarks fetches a user's RSS feed and returns bookmarks on or after
+// from.
 func (c *Client) FetchBookmarks(ctx context.Context, user string, from time.Time) ([]Bookmark, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.rssURL(user), nil)
 	if err != nil {
@@ -65,11 +72,13 @@ func (c *Client) FetchBookmarks(ctx context.Context, user string, from time.Time
 	return filtered, nil
 }
 
+// rssURL builds the RSS feed URL for a Hatena user.
 func (c *Client) rssURL(user string) string {
 	base := strings.TrimRight(c.baseURL, "/")
 	return base + "/" + url.PathEscape(user) + "/rss"
 }
 
+// ParseRSS parses Hatena Bookmark RSS data into bookmarks.
 func ParseRSS(r io.Reader) ([]Bookmark, error) {
 	decoder := xml.NewDecoder(r)
 	var bookmarks []Bookmark
@@ -101,6 +110,7 @@ func ParseRSS(r io.Reader) ([]Bookmark, error) {
 	return bookmarks, nil
 }
 
+// parseItem parses a single RSS item element.
 func parseItem(decoder *xml.Decoder) (Bookmark, error) {
 	var bm Bookmark
 	for {
@@ -134,6 +144,7 @@ func parseItem(decoder *xml.Decoder) (Bookmark, error) {
 	}
 }
 
+// parseDate parses the date formats commonly used in Hatena Bookmark RSS.
 func parseDate(value string) (time.Time, error) {
 	layouts := []string{
 		time.RFC3339,

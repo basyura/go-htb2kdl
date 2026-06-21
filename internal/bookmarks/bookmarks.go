@@ -11,27 +11,33 @@ import (
 
 const maxCompletedURLs = 100
 
+// File represents the contents of bookmarks.yml.
 type File struct {
 	Settings SettingsConfig  `yaml:"settings,omitempty"`
 	Mail     MailConfig      `yaml:"mail,omitempty"`
 	Users    map[string]User `yaml:"users"`
 }
 
+// SettingsConfig holds global queue settings from bookmarks.yml.
 type SettingsConfig struct {
 	Limit *int `yaml:"limit,omitempty"`
 }
 
+// MailConfig holds Gmail SMTP settings from bookmarks.yml.
 type MailConfig struct {
 	From        string `yaml:"from"`
 	To          string `yaml:"to"`
 	AppPassword string `yaml:"app_password"`
 }
 
+// User stores queued and completed bookmark URLs for one Hatena user.
 type User struct {
 	Bookmarks []string `yaml:"bookmarks"`
 	Completed []string `yaml:"completed"`
 }
 
+// Load reads bookmarks.yml and returns an empty file structure when it does not
+// exist.
 func Load(path string) (File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -54,6 +60,8 @@ func Load(path string) (File, error) {
 	return file, nil
 }
 
+// Add appends new URLs to a user's queue while skipping empty, queued, and
+// completed URLs.
 func (f *File) Add(user string, urls []string) int {
 	if f.Users == nil {
 		f.Users = make(map[string]User)
@@ -84,11 +92,13 @@ func (f *File) Add(user string, urls []string) int {
 	return added
 }
 
+// Queued returns a copy of the queued URLs for the user.
 func (f File) Queued(user string) []string {
 	entry := f.Users[user]
 	return append([]string(nil), entry.Bookmarks...)
 }
 
+// CompleteFirst moves the first count queued URLs to the completed history.
 func (f *File) CompleteFirst(user string, count int) {
 	if count <= 0 {
 		return
@@ -122,6 +132,7 @@ func (f *File) CompleteFirst(user string, count int) {
 	f.Users[user] = entry
 }
 
+// SaveAtomic writes bookmarks.yml through a temporary file and atomic rename.
 func SaveAtomic(path string, file File) error {
 	if file.Users == nil {
 		file.Users = make(map[string]User)

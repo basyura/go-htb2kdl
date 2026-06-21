@@ -18,18 +18,21 @@ const (
 	gmailSMTPAddr = gmailSMTPHost + ":587"
 )
 
+// Config holds Gmail SMTP sender, recipient, and app password settings.
 type Config struct {
 	From        string
 	To          string
 	AppPassword string
 }
 
+// EPUBMessage describes the email subject, body, and EPUB attachment path.
 type EPUBMessage struct {
 	Subject string
 	Body    string
 	Path    string
 }
 
+// SendEPUB builds and sends an EPUB email through Gmail SMTP.
 func SendEPUB(ctx context.Context, cfg Config, msg EPUBMessage) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -53,6 +56,7 @@ func SendEPUB(ctx context.Context, cfg Config, msg EPUBMessage) error {
 	return nil
 }
 
+// Validate checks that all required mail configuration fields are present.
 func (cfg Config) Validate() error {
 	if cfg.From == "" {
 		return errors.New("mail.from を bookmarks.yml に設定してください")
@@ -66,6 +70,7 @@ func (cfg Config) Validate() error {
 	return nil
 }
 
+// BuildEPUBMessage builds a MIME message with a text body and EPUB attachment.
 func BuildEPUBMessage(cfg Config, msg EPUBMessage) ([]byte, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -134,6 +139,7 @@ func BuildEPUBMessage(cfg Config, msg EPUBMessage) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// writeBase64 writes base64-encoded data using CRLF line wrapping.
 func writeBase64(w interface{ Write([]byte) (int, error) }, data []byte) error {
 	encoder := base64.NewEncoder(base64.StdEncoding, &newLineWriter{w: w})
 	if _, err := encoder.Write(data); err != nil {
@@ -143,11 +149,13 @@ func writeBase64(w interface{ Write([]byte) (int, error) }, data []byte) error {
 	return encoder.Close()
 }
 
+// newLineWriter wraps base64 output at 76 columns for MIME compatibility.
 type newLineWriter struct {
 	w      interface{ Write([]byte) (int, error) }
 	column int
 }
 
+// Write writes bytes to the underlying writer while inserting CRLF line breaks.
 func (w *newLineWriter) Write(data []byte) (int, error) {
 	written := 0
 	for _, b := range data {

@@ -27,6 +27,7 @@ const dateLayout = "20060102"
 
 var errNoChapters = errors.New("EPUB に含められる記事がありません")
 
+// options holds validated command-line options used by a single CLI run.
 type options struct {
 	user           string
 	from           time.Time
@@ -38,20 +39,26 @@ type options struct {
 	send           bool
 }
 
+// runConfig holds injectable runtime settings that are not parsed from flags.
 type runConfig struct {
 	defaultStylesheet []byte
 	bookmarksPath     string
 	logPath           string
 }
 
+// RunOption customizes runConfig before the CLI starts processing.
 type RunOption func(*runConfig)
 
+// WithDefaultStylesheet sets the stylesheet bytes used when no CSS path is
+// provided by command-line options.
 func WithDefaultStylesheet(stylesheet []byte) RunOption {
 	return func(cfg *runConfig) {
 		cfg.defaultStylesheet = stylesheet
 	}
 }
 
+// Run parses CLI arguments, selects immediate or queued execution, and writes
+// progress and result messages to the provided writers.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOptions ...RunOption) error {
 	var cfg runConfig
 	for _, option := range runOptions {
@@ -108,6 +115,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
 }
 
+// fileExists reports whether path exists while treating unexpected stat errors
+// as user-facing failures.
 func fileExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -119,6 +128,8 @@ func fileExists(path string) (bool, error) {
 	return false, fmt.Errorf("bookmarks.yml の確認に失敗しました: %w", err)
 }
 
+// applyBookmarksLimit applies the queue file's default limit when the user did
+// not specify --limit explicitly.
 func applyBookmarksLimit(opts options, queue bookmarkfile.File) options {
 	if opts.limitSpecified {
 		return opts
@@ -129,6 +140,8 @@ func applyBookmarksLimit(opts options, queue bookmarkfile.File) options {
 	return opts
 }
 
+// runImmediate fetches the current bookmark range and generates an EPUB without
+// using the queued bookmarks file.
 func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 	hatenaClient := hatena.NewClient(client)
@@ -163,6 +176,8 @@ func runImmediate(ctx context.Context, opts options, cfg runConfig, stdout, stde
 	return nil
 }
 
+// runQueued loads the queued bookmarks file and delegates queued EPUB
+// generation to runQueuedWithQueue.
 func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger) error {
 	bookmarksPath, err := resolveBookmarksPath(opts, cfg)
 	if err != nil {
@@ -177,6 +192,8 @@ func runQueued(ctx context.Context, opts options, cfg runConfig, stdout, stderr 
 	return runQueuedWithQueue(ctx, opts, cfg, stdout, stderr, logger, bookmarksPath, queue)
 }
 
+// runQueuedWithQueue adds fetched bookmarks to the queue and generates an EPUB
+// once enough queued URLs are available.
 func runQueuedWithQueue(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger, bookmarksPath string, queue bookmarkfile.File) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 	hatenaClient := hatena.NewClient(client)
@@ -229,6 +246,8 @@ func runQueuedWithQueue(ctx context.Context, opts options, cfg runConfig, stdout
 	return bookmarkfile.SaveAtomic(bookmarksPath, queue)
 }
 
+// buildChapters extracts article content for each bookmark and converts it into
+// EPUB chapters, optionally preserving failures as chapters.
 func buildChapters(ctx context.Context, client *http.Client, bookmarks []hatena.Bookmark, includeFailureChapters bool, stderr io.Writer, logger *runtimeLogger) ([]book.Chapter, error) {
 	extractor := content.NewExtractor(client)
 	converter := convert.NewMarkdownConverter()
@@ -281,6 +300,8 @@ func buildChapters(ctx context.Context, client *http.Client, bookmarks []hatena.
 	return chapters, nil
 }
 
+// failedChapter builds a placeholder chapter that records the URL and extraction
+// error for an article that could not be fetched.
 func failedChapter(targetURL string, err error) book.Chapter {
 	return book.Chapter{
 		Title: "記事を取得できませんでした",
@@ -294,6 +315,7 @@ func failedChapter(targetURL string, err error) book.Chapter {
 	}
 }
 
+// writeBook writes the EPUB file and returns the generated output path.
 func writeBook(ctx context.Context, client *http.Client, opts options, cfg runConfig, chapters []book.Chapter, stdout io.Writer, logger *runtimeLogger) (string, error) {
 	created := time.Now()
 	out := opts.out
@@ -324,6 +346,7 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 	return out, nil
 }
 
+// loadMailConfig reads mail settings from the resolved bookmarks file.
 func loadMailConfig(opts options, cfg runConfig) (bookmarkfile.MailConfig, error) {
 	bookmarksPath, err := resolveBookmarksPath(opts, cfg)
 	if err != nil {
@@ -336,6 +359,8 @@ func loadMailConfig(opts options, cfg runConfig) (bookmarkfile.MailConfig, error
 	return file.Mail, nil
 }
 
+// sendBook sends the generated EPUB by mail and removes the local file after a
+// successful send.
 func sendBook(ctx context.Context, opts options, cfg bookmarkfile.MailConfig, out string, stdout io.Writer, logger *runtimeLogger) error {
 	mailConfig := mail.Config{
 		From:        cfg.From,
@@ -358,6 +383,7 @@ func sendBook(ctx context.Context, opts options, cfg bookmarkfile.MailConfig, ou
 	return nil
 }
 
+// removeSentBook deletes an EPUB file that has already been sent.
 func removeSentBook(path string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("送信済み EPUB ファイルの削除に失敗しました: %w", err)
@@ -365,6 +391,8 @@ func removeSentBook(path string) error {
 	return nil
 }
 
+// resolveBookmarksPath chooses the bookmarks.yml path from CLI options,
+// injected configuration, or the executable directory.
 func resolveBookmarksPath(opts options, cfg runConfig) (string, error) {
 	if opts.file != "" {
 		return opts.file, nil
@@ -379,6 +407,8 @@ func resolveBookmarksPath(opts options, cfg runConfig) (string, error) {
 	return filepath.Join(filepath.Dir(executable), "bookmarks.yml"), nil
 }
 
+// sortBookmarksOldestFirst orders bookmarks in-place from oldest to newest,
+// keeping entries without timestamps at the end.
 func sortBookmarksOldestFirst(bookmarks []hatena.Bookmark) {
 	sort.SliceStable(bookmarks, func(i, j int) bool {
 		left := bookmarks[i].BookmarkedAt
@@ -393,6 +423,8 @@ func sortBookmarksOldestFirst(bookmarks []hatena.Bookmark) {
 	})
 }
 
+// loadStylesheet returns the embedded stylesheet unless a CSS path is provided,
+// in which case it reads and returns that file.
 func loadStylesheet(cssPath string, defaultStylesheet []byte) ([]byte, error) {
 	if cssPath == "" {
 		return defaultStylesheet, nil
@@ -404,6 +436,7 @@ func loadStylesheet(cssPath string, defaultStylesheet []byte) ([]byte, error) {
 	return stylesheet, nil
 }
 
+// parseArgs parses command-line flags and validates required options.
 func parseArgs(args []string) (options, error) {
 	var opts options
 	fs := flag.NewFlagSet("htb2kdl", flag.ContinueOnError)
@@ -442,6 +475,8 @@ func parseArgs(args []string) (options, error) {
 	return opts, nil
 }
 
+// parseFromDate parses --from as either yyyyMMdd or a negative relative day
+// offset from today in the local timezone.
 func parseFromDate(value string, today time.Time) (time.Time, error) {
 	if strings.HasPrefix(value, "-") {
 		days, err := strconv.Atoi(value)

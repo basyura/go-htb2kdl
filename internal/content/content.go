@@ -11,15 +11,20 @@ import (
 	readability "github.com/mackee/go-readability"
 )
 
+// Article contains the readable article title and Markdown body extracted from
+// a page.
 type Article struct {
 	Title    string
 	Markdown string
 }
 
+// Extractor fetches web pages and extracts their readable article content.
 type Extractor struct {
 	httpClient *http.Client
 }
 
+// NewExtractor creates an Extractor using http.DefaultClient when no client is
+// provided.
 func NewExtractor(httpClient *http.Client) *Extractor {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -27,6 +32,7 @@ func NewExtractor(httpClient *http.Client) *Extractor {
 	return &Extractor{httpClient: httpClient}
 }
 
+// Extract fetches targetURL and returns its main readable content as Markdown.
 func (e *Extractor) Extract(ctx context.Context, targetURL string) (Article, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
