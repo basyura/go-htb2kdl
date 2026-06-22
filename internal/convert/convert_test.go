@@ -137,6 +137,30 @@ func TestMarkdownConverterRepairsLeadingDelimiterTable(t *testing.T) {
 	}
 }
 
+func TestMarkdownConverterRepairsLineNumberCodeTable(t *testing.T) {
+	converter := NewMarkdownConverter()
+	got, err := converter.Convert("HTML\n\n<main>\n <div popover>\n <button></button>\n </div>\n</main>\n<script>document.querySelector('\\[popover\\]').showPopover();</script>\n\n| --- | --- |\n| 1\n\n2\n\n3\n\n4\n\n5\n\n6 | < main >\n\n< div popover >\n\n< button > < / button >\n\n< / div >\n\n< / main >\n\n<script> document. querySelector ( '\\[popover\\]'). showPopover (); </script> |\n\nこの変更の背景です。\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(got, "<table>") {
+		t.Fatalf("line-number code was parsed as table: %s", got)
+	}
+	if strings.Contains(got, "raw HTML omitted") || strings.Contains(got, "| --- | --- |") {
+		t.Fatalf("raw HTML or line-number table remains: %s", got)
+	}
+	if !strings.Contains(got, "<pre><code class=\"language-html\">&lt;main&gt;") {
+		t.Fatalf("line-number code was not parsed as code block: %s", got)
+	}
+	if !strings.Contains(got, "&lt;button&gt;&lt;/button&gt;") {
+		t.Fatalf("code body was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "<p>この変更の背景です。</p>") {
+		t.Fatalf("prose after code table was not preserved: %s", got)
+	}
+}
+
 func TestMarkdownConverterRepairsEmptyFenceBeforeCode(t *testing.T) {
 	converter := NewMarkdownConverter()
 	got, err := converter.Convert("```\n```\n// CounterViewModel.kt: 単一のStateFlowで管理し、ユーザー操作ごとにメソッドを定義\nclass CounterViewModel : ViewModel() {\nprivate val _state = MutableStateFlow(CounterUiState())\nval state: StateFlow<CounterUiState> = _state.asStateFlow()\n}\n\n本文です。\n")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -173,6 +174,8 @@ func normalizeMarkdown(markdown string) string {
 
 	out = normalizeEmptyCodeFences(out)
 	out = normalizeShellCodeBlocks(out)
+	out = normalizeRawHTMLCodeBlocks(out)
+	out = normalizeLineNumberCodeTables(out)
 	out = normalizeBareCodeBlocks(out)
 	out = normalizeIndentedProse(out)
 	out = normalizeMalformedTables(out)
@@ -437,9 +440,300 @@ func normalizeMalformedTables(lines []string) []string {
 	return out
 }
 
+// normalizeRawHTMLCodeBlocks wraps raw HTML examples as fenced code blocks and
+// removes a following duplicated line-number display table when present.
+func normalizeRawHTMLCodeBlocks(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	inFence := false
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			out = append(out, lines[i])
+			continue
+		}
+		if inFence || !looksLikeRawHTMLCodeLine(trimmed) {
+			out = append(out, lines[i])
+			continue
+		}
+
+		end := i
+		for end < len(lines) && looksLikeRawHTMLCodeLine(strings.TrimSpace(lines[end])) {
+			end++
+		}
+		if end-i < 2 {
+			out = append(out, lines[i])
+			continue
+		}
+
+		out = append(out, "```html")
+		out = append(out, lines[i:end]...)
+		out = append(out, "```")
+		if next, ok := consumeDuplicatedLineNumberDisplay(lines, end); ok {
+			i = next - 1
+			continue
+		}
+		i = end - 1
+	}
+	return out
+}
+
+// consumeDuplicatedLineNumberDisplay skips a line-number display table that
+// duplicates the raw HTML code example immediately before it.
+func consumeDuplicatedLineNumberDisplay(lines []string, start int) (int, bool) {
+	i := start
+	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+		i++
+	}
+	if i >= len(lines) || !isTwoColumnDelimiterRow(lines[i]) {
+		return start, false
+	}
+	i++
+
+	sawNumber := false
+	sawCode := false
+	for i < len(lines) {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			i++
+			continue
+		}
+		if looksLikeMarkdownHeading(trimmed) || isListLine(trimmed) {
+			break
+		}
+		if strings.ContainsAny(trimmed, "。、ですます") && !looksLikeLooseHTMLCodeDisplayLine(trimmed) {
+			break
+		}
+		if looksLikeStandaloneLineNumber(strings.Trim(trimmed, "| ")) {
+			sawNumber = true
+			i++
+			continue
+		}
+		if strings.Contains(trimmed, "|") {
+			for _, part := range strings.Split(trimmed, "|") {
+				part = strings.TrimSpace(part)
+				if looksLikeStandaloneLineNumber(part) {
+					sawNumber = true
+				}
+				if looksLikeLooseHTMLCodeDisplayLine(part) {
+					sawCode = true
+				}
+			}
+			i++
+			continue
+		}
+		if looksLikeLooseHTMLCodeDisplayLine(trimmed) {
+			sawCode = true
+			i++
+			continue
+		}
+		break
+	}
+	if !sawNumber || !sawCode {
+		return start, false
+	}
+	return i, true
+}
+
+func looksLikeRawHTMLCodeLine(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	return strings.HasPrefix(trimmed, "<") && strings.Contains(trimmed, ">")
+}
+
+func looksLikeLooseHTMLCodeDisplayLine(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	return looksLikeHTMLTagLine(trimmed) ||
+		(strings.HasPrefix(trimmed, "< ") && strings.Contains(trimmed, " >")) ||
+		(strings.Contains(trimmed, "< /") && strings.Contains(trimmed, " >"))
+}
+
+// normalizeLineNumberCodeTables converts extracted line-number code tables into
+// fenced code blocks before GFM table parsing sees them.
+func normalizeLineNumberCodeTables(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		code, end, ok := parseLineNumberCodeTable(lines, i)
+		if !ok {
+			out = append(out, lines[i])
+			continue
+		}
+		out = append(out, "```")
+		out = append(out, code...)
+		out = append(out, "```")
+		i = end - 1
+	}
+	return out
+}
+
+// parseLineNumberCodeTable parses a two-column table whose first column is
+// only line numbers and whose second column is source code.
+func parseLineNumberCodeTable(lines []string, start int) ([]string, int, bool) {
+	if start >= len(lines) || !isTwoColumnDelimiterRow(lines[start]) {
+		return nil, start, false
+	}
+	i := start + 1
+	firstCode, next, ok := parseLineNumberCodeStart(lines, i)
+	if !ok {
+		return nil, start, false
+	}
+	numberLines := append([]string{}, firstCode.numbers...)
+	codeLines := append([]string{}, firstCode.code...)
+	i = next
+
+	for i < len(lines) {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			break
+		}
+		if isTableRow(trimmed) || looksLikeMarkdownHeading(trimmed) || isListLine(trimmed) {
+			break
+		}
+		if looksLikeStandaloneLineNumber(trimmed) {
+			numberLines = append(numberLines, trimmed)
+			i++
+			continue
+		}
+		if !looksLikeCode(trimmed) && !looksLikeCodeContinuation(trimmed) && !looksLikeHTMLTagLine(trimmed) {
+			break
+		}
+		codeLines = append(codeLines, strings.TrimRight(lines[i], " \t"))
+		i++
+	}
+
+	if len(numberLines) < 2 || len(codeLines) < 2 || !isConsecutiveLineNumbers(numberLines) {
+		return nil, start, false
+	}
+	return codeLines, i, true
+}
+
+type lineNumberCodeRow struct {
+	numbers []string
+	code    []string
+}
+
+// splitLineNumberCodeRow splits the first row of a malformed line-number code
+// table into line-number and code cells.
+func splitLineNumberCodeRow(line string) (lineNumberCodeRow, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(line), `\`)
+	cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+	if len(cells) != 2 {
+		return lineNumberCodeRow{}, false
+	}
+	numbers := splitNonEmptyLines(cells[0])
+	if len(numbers) == 0 {
+		return lineNumberCodeRow{}, false
+	}
+	for _, number := range numbers {
+		if !looksLikeStandaloneLineNumber(number) {
+			return lineNumberCodeRow{}, false
+		}
+	}
+	code := splitNonEmptyLines(cells[1])
+	if len(code) == 0 {
+		return lineNumberCodeRow{}, false
+	}
+	return lineNumberCodeRow{numbers: numbers, code: code}, true
+}
+
+// parseLineNumberCodeStart parses the first row even when the line-number cell
+// was split across multiple Markdown lines.
+func parseLineNumberCodeStart(lines []string, start int) (lineNumberCodeRow, int, bool) {
+	if start >= len(lines) {
+		return lineNumberCodeRow{}, start, false
+	}
+	if isTableRow(lines[start]) {
+		row, ok := splitLineNumberCodeRow(lines[start])
+		return row, start + 1, ok
+	}
+
+	var numbers []string
+	for i := start; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			return lineNumberCodeRow{}, start, false
+		}
+		line = strings.TrimPrefix(line, `\|`)
+		line = strings.TrimPrefix(line, "|")
+		line = strings.TrimSpace(line)
+		left, right, ok := strings.Cut(line, "|")
+		if !ok {
+			if !looksLikeStandaloneLineNumber(line) {
+				return lineNumberCodeRow{}, start, false
+			}
+			numbers = append(numbers, line)
+			continue
+		}
+
+		left = strings.TrimSpace(left)
+		if !looksLikeStandaloneLineNumber(left) {
+			return lineNumberCodeRow{}, start, false
+		}
+		numbers = append(numbers, left)
+		code := splitNonEmptyLines(strings.Trim(right, " |"))
+		if len(code) == 0 {
+			return lineNumberCodeRow{}, start, false
+		}
+		return lineNumberCodeRow{numbers: numbers, code: code}, i + 1, true
+	}
+	return lineNumberCodeRow{}, start, false
+}
+
+func splitNonEmptyLines(value string) []string {
+	parts := strings.Split(value, "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func looksLikeStandaloneLineNumber(line string) bool {
+	if line == "" {
+		return false
+	}
+	for _, r := range line {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isConsecutiveLineNumbers(lines []string) bool {
+	for i, line := range lines {
+		number, err := strconv.Atoi(line)
+		if err != nil || number != i+1 {
+			return false
+		}
+	}
+	return true
+}
+
+func isTwoColumnDelimiterRow(line string) bool {
+	if !isTableDelimiterRow(line) {
+		return false
+	}
+	trimmed := strings.TrimPrefix(strings.TrimSpace(line), `\`)
+	cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+	return len(cells) == 2
+}
+
+func looksLikeHTMLTagLine(trimmed string) bool {
+	return (strings.HasPrefix(trimmed, "<") && strings.Contains(trimmed, ">")) ||
+		(strings.HasPrefix(trimmed, "&lt;") && strings.Contains(trimmed, "&gt;"))
+}
+
 // isTableRow reports whether a line has Markdown table pipe delimiters.
 func isTableRow(line string) bool {
 	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimPrefix(trimmed, `\`)
 	return strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") && strings.Count(trimmed, "|") >= 2
 }
 
@@ -448,7 +742,8 @@ func isTableDelimiterRow(line string) bool {
 	if !isTableRow(line) {
 		return false
 	}
-	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
+	trimmed := strings.TrimPrefix(strings.TrimSpace(line), `\`)
+	cells := strings.Split(strings.Trim(trimmed, "|"), "|")
 	if len(cells) == 0 {
 		return false
 	}
