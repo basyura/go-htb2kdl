@@ -30,6 +30,14 @@ EPUB には同梱の `style.css` が既定で適用される。
 go run . --user <はてなID> --from <yyyyMMdd> --css style.css
 ```
 
+デバッグ用途では、URL を直接指定して 1 件だけ EPUB を生成できる。
+この場合は、はてなブックマーク RSS や `bookmarks.yml` は使わない。
+
+```sh
+./htb2kdl https://coliss.com/articles/build-websites/operation/work/chrome-149-adds-9-new-css-feature.html
+./htb2kdl https://example.com/article --out debug.epub
+```
+
 実行時のログは標準出力に出力される。また、実行ファイルと同じディレクトリの
 `htb2kdl.log` にも出力される。ログファイルが 5MiB を超える場合は
 `htb2kdl.log.1` から `htb2kdl.log.3` まで 3 世代でローテーションする。

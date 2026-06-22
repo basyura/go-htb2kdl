@@ -8,6 +8,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,6 +35,7 @@ type options struct {
 	out            string
 	css            string
 	file           string
+	debugURL       string
 	limit          int
 	limitSpecified bool
 	send           bool
@@ -83,6 +85,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	}
 	defer closer.Close()
 	logger.PrintStartBanner(time.Now())
+	if opts.debugURL != "" {
+		logger.Printf("実行を開始しました url=%s", opts.debugURL)
+		return runDebugURL(ctx, opts, cfg, stdout, stderr, logger)
+	}
 	logger.Printf("実行を開始しました user=%s from=%s", opts.user, opts.from.Format(dateLayout))
 
 	if opts.limitSpecified {
@@ -113,6 +119,19 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, runOption
 	}
 
 	return runImmediate(ctx, opts, cfg, stdout, stderr, logger)
+}
+
+// runDebugURL generates an EPUB from a single URL without fetching Hatena
+// Bookmark RSS or touching the queued bookmarks file.
+func runDebugURL(ctx context.Context, opts options, cfg runConfig, stdout, stderr io.Writer, logger *runtimeLogger) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+	targets := []hatena.Bookmark{{URL: opts.debugURL}}
+	chapters, err := buildChapters(ctx, client, targets, true, stderr, logger)
+	if err != nil {
+		return err
+	}
+	_, err = writeBook(ctx, client, opts, cfg, chapters, stdout, logger)
+	return err
 }
 
 // fileExists reports whether path exists while treating unexpected stat errors
@@ -320,7 +339,7 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 	created := time.Now()
 	out := opts.out
 	if out == "" {
-		out = book.DefaultOutputPath(opts.user, created)
+		out = book.DefaultOutputPath(bookAuthor(opts), created)
 	}
 
 	stylesheet, err := loadStylesheet(opts.css, cfg.defaultStylesheet)
@@ -330,8 +349,8 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 
 	logger.Printf("EPUB を生成します output=%s chapters=%d", out, len(chapters))
 	if err := book.Write(book.Options{
-		Title:      fmt.Sprintf("%s のはてなブックマーク", opts.user),
-		Author:     opts.user,
+		Title:      bookTitle(opts),
+		Author:     bookAuthor(opts),
 		Output:     out,
 		Chapters:   chapters,
 		Created:    created,
@@ -344,6 +363,22 @@ func writeBook(ctx context.Context, client *http.Client, opts options, cfg runCo
 
 	fmt.Fprintf(stdout, "generated: %s\n", out)
 	return out, nil
+}
+
+// bookTitle returns the EPUB title for the current run mode.
+func bookTitle(opts options) string {
+	if opts.debugURL != "" {
+		return "デバッグ用 EPUB"
+	}
+	return fmt.Sprintf("%s のはてなブックマーク", opts.user)
+}
+
+// bookAuthor returns the EPUB author for the current run mode.
+func bookAuthor(opts options) string {
+	if opts.debugURL != "" {
+		return "htb2kdl debug"
+	}
+	return opts.user
 }
 
 // loadMailConfig reads mail settings from the resolved bookmarks file.
@@ -439,6 +474,20 @@ func loadStylesheet(cssPath string, defaultStylesheet []byte) ([]byte, error) {
 // parseArgs parses command-line flags and validates required options.
 func parseArgs(args []string) (options, error) {
 	var opts options
+	flagArgs, positionals, err := splitFlagArgs(args)
+	if err != nil {
+		return opts, err
+	}
+	if len(positionals) > 1 {
+		return opts, errors.New("URL は 1 件だけ指定してください")
+	}
+	if len(positionals) == 1 {
+		if err := validateDebugURL(positionals[0]); err != nil {
+			return opts, err
+		}
+		opts.debugURL = positionals[0]
+	}
+
 	fs := flag.NewFlagSet("htb2kdl", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.user, "user", "", "Hatena user ID")
@@ -449,8 +498,25 @@ func parseArgs(args []string) (options, error) {
 	fs.BoolVar(&opts.send, "send", false, "send generated EPUB by Gmail SMTP")
 	from := fs.String("from", "", "bookmark date lower bound in yyyyMMdd")
 
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(flagArgs); err != nil {
 		return opts, err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "limit" {
+			opts.limitSpecified = true
+		}
+	})
+	if opts.debugURL != "" {
+		if opts.limitSpecified && opts.limit > 0 {
+			return opts, errors.New("URL 指定時は --limit を指定できません")
+		}
+		if opts.file != "" {
+			return opts, errors.New("URL 指定時は --file を指定できません")
+		}
+		if opts.send {
+			return opts, errors.New("URL 指定時は --send を指定できません")
+		}
+		return opts, nil
 	}
 	if opts.user == "" {
 		return opts, errors.New("--user は必須です")
@@ -458,11 +524,6 @@ func parseArgs(args []string) (options, error) {
 	if opts.limit < 0 {
 		return opts, errors.New("--limit は 0 以上で指定してください")
 	}
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "limit" {
-			opts.limitSpecified = true
-		}
-	})
 	if *from == "" {
 		return opts, errors.New("--from は必須です")
 	}
@@ -473,6 +534,75 @@ func parseArgs(args []string) (options, error) {
 	}
 	opts.from = parsed
 	return opts, nil
+}
+
+// splitFlagArgs separates one positional URL from flags while allowing the URL
+// to appear before or after supported flags.
+func splitFlagArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]struct{}{
+		"user":  {},
+		"out":   {},
+		"css":   {},
+		"file":  {},
+		"limit": {},
+		"from":  {},
+	}
+	boolFlags := map[string]struct{}{
+		"send": {},
+	}
+
+	var flagArgs []string
+	var positionals []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals = append(positionals, arg)
+			continue
+		}
+		name, hasValue := flagName(arg)
+		if _, ok := boolFlags[name]; ok {
+			flagArgs = append(flagArgs, arg)
+			continue
+		}
+		if _, ok := valueFlags[name]; ok {
+			flagArgs = append(flagArgs, arg)
+			if !hasValue {
+				if i+1 >= len(args) {
+					return nil, nil, fmt.Errorf("flag needs an argument: -%s", name)
+				}
+				i++
+				flagArgs = append(flagArgs, args[i])
+			}
+			continue
+		}
+		flagArgs = append(flagArgs, arg)
+	}
+	return flagArgs, positionals, nil
+}
+
+// flagName returns a normalized flag name and whether the value is included in
+// the same argument.
+func flagName(arg string) (string, bool) {
+	name := strings.TrimLeft(arg, "-")
+	if idx := strings.Index(name, "="); idx >= 0 {
+		return name[:idx], true
+	}
+	return name, false
+}
+
+// validateDebugURL checks whether targetURL is an absolute HTTP(S) URL.
+func validateDebugURL(targetURL string) error {
+	parsed, err := url.ParseRequestURI(targetURL)
+	if err != nil {
+		return fmt.Errorf("URL が不正です: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("URL は http または https で指定してください")
+	}
+	if parsed.Host == "" {
+		return errors.New("URL はホスト名を含めて指定してください")
+	}
+	return nil
 }
 
 // parseFromDate parses --from as either yyyyMMdd or a negative relative day

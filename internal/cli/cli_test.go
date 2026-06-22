@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +112,68 @@ func TestParseArgsSend(t *testing.T) {
 	}
 	if !opts.send {
 		t.Fatal("send = false, want true")
+	}
+}
+
+func TestParseArgsDebugURL(t *testing.T) {
+	opts, err := parseArgs([]string{"https://example.com/article"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.debugURL != "https://example.com/article" {
+		t.Fatalf("debugURL = %q, want https://example.com/article", opts.debugURL)
+	}
+	if opts.user != "" {
+		t.Fatalf("user = %q, want empty", opts.user)
+	}
+	if !opts.from.IsZero() {
+		t.Fatalf("from = %v, want zero", opts.from)
+	}
+}
+
+func TestParseArgsDebugURLAllowsFlagsAfterURL(t *testing.T) {
+	opts, err := parseArgs([]string{"https://example.com/article", "--out", "debug.epub", "--css", "style.css"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.debugURL != "https://example.com/article" {
+		t.Fatalf("debugURL = %q, want https://example.com/article", opts.debugURL)
+	}
+	if opts.out != "debug.epub" {
+		t.Fatalf("out = %q, want debug.epub", opts.out)
+	}
+	if opts.css != "style.css" {
+		t.Fatalf("css = %q, want style.css", opts.css)
+	}
+}
+
+func TestParseArgsDebugURLRejectsMultipleURLs(t *testing.T) {
+	_, err := parseArgs([]string{"https://example.com/one", "https://example.com/two"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "URL は 1 件だけ指定してください") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestParseArgsDebugURLRejectsNonHTTPURL(t *testing.T) {
+	_, err := parseArgs([]string{"file:///tmp/article.html"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "URL は http または https で指定してください") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestParseArgsDebugURLRejectsQueuedOptions(t *testing.T) {
+	_, err := parseArgs([]string{"https://example.com/article", "--limit", "1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "URL 指定時は --limit を指定できません") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -277,5 +341,46 @@ func TestBuildChaptersWithoutFailureChapterReportsEmpty(t *testing.T) {
 	_, err := buildChapters(context.Background(), nil, bookmarks, false, &stderr, nil)
 	if !errors.Is(err, errNoChapters) {
 		t.Fatalf("err = %v, want errNoChapters", err)
+	}
+}
+
+func TestRunDebugURLGeneratesEPUB(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!doctype html>
+<html>
+<head><title>Debug Article</title></head>
+<body>
+<article>
+<h1>Debug Article</h1>
+<p>本文抽出の確認に使うデバッグ用の記事本文です。</p>
+</article>
+</body>
+</html>`))
+	}))
+	defer server.Close()
+
+	out := filepath.Join(t.TempDir(), "debug.epub")
+	logPath := filepath.Join(t.TempDir(), "htb2kdl.log")
+	var stdout, stderr strings.Builder
+
+	err := Run(
+		context.Background(),
+		[]string{server.URL, "--out", out},
+		&stdout,
+		&stderr,
+		WithDefaultStylesheet([]byte("body { font-family: sans-serif; }")),
+		func(cfg *runConfig) {
+			cfg.logPath = logPath
+		},
+	)
+	if err != nil {
+		t.Fatalf("Run error = %v, stderr = %s", err, stderr.String())
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("generated EPUB stat error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "generated: "+out) {
+		t.Fatalf("stdout = %q, want generated path", stdout.String())
 	}
 }
