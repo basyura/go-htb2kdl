@@ -112,6 +112,7 @@ func Write(opts Options) error {
 			Href:  filename,
 		})
 	}
+	writer.AddContent("end.xhtml", []byte(renderEndPage()))
 
 	if err := writer.TableOfContents("toc", toc); err != nil {
 		return fmt.Errorf("EPUB 目次の作成に失敗しました: %w", err)
@@ -732,6 +733,40 @@ func renderBookmarksPage(chapters []Chapter, chapterFiles []string, includeStyle
 <body>
   <h1>ブックマーク一覧</h1>
   ` + list.String() + `
+</body>
+</html>`
+}
+
+// renderEndPage renders the final EPUB page.
+func renderEndPage() string {
+	return `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ja" xml:lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>END</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    p {
+      margin: 0;
+      font-size: 2rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <p>END</p>
 </body>
 </html>`
 }

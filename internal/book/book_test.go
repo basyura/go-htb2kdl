@@ -102,6 +102,15 @@ func TestWrite(t *testing.T) {
 		strings.Index(opf, `<itemref idref="bookmarks.xhtml"></itemref>`) > strings.Index(opf, `<itemref idref="chapter-001.xhtml"></itemref>`) {
 		t.Fatalf("bookmarks page should be between cover and first chapter: %s", opf)
 	}
+	if !strings.Contains(opf, `<item href="end.xhtml" id="end.xhtml" media-type="application/xhtml+xml"`) {
+		t.Fatalf("content.opf is missing end page manifest item: %s", opf)
+	}
+	if !strings.Contains(opf, `<itemref idref="end.xhtml"></itemref>`) {
+		t.Fatalf("content.opf spine is missing end page: %s", opf)
+	}
+	if strings.Index(opf, `<itemref idref="end.xhtml"></itemref>`) < strings.Index(opf, `<itemref idref="chapter-002.xhtml"></itemref>`) {
+		t.Fatalf("end page should be after the final chapter: %s", opf)
+	}
 
 	toc := readZipFile(t, &zipReader.Reader, "epub/toc.xhtml")
 	if !strings.Contains(toc, `xmlns:epub="http://www.idpf.org/2007/ops"`) {
@@ -133,6 +142,14 @@ func TestWrite(t *testing.T) {
 	}
 	if strings.Contains(opf, `<itemref idref="style-css"`) {
 		t.Fatalf("stylesheet should not be in spine: %s", opf)
+	}
+
+	endPage := readZipFile(t, &zipReader.Reader, "epub/end.xhtml")
+	if !strings.Contains(endPage, `<p>END</p>`) {
+		t.Fatalf("end page is missing END text: %s", endPage)
+	}
+	if !strings.Contains(endPage, `align-items: center;`) || !strings.Contains(endPage, `justify-content: center;`) {
+		t.Fatalf("end page does not center END text: %s", endPage)
 	}
 }
 
